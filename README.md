@@ -26,16 +26,34 @@ This enables AWS workloads to authenticate with services that require OIDC token
 
 ## Architecture
 
+### Token Exchange Flow
+
 ```mermaid
-graph TB
-    A[AWS Credentials] -->|STS Verify| B[Token Exchange Lambda]
-    B -->|Sign JWT| C[KMS]
-    C -->|Signature| B
-    B -->|Return| D[OIDC Token JWT]
-    D -->|Authenticate| E[OIDC Consumer<br/>e.g. Tailscale]
-    E -->|Verify Token| F[JWKS Lambda]
-    F -->|Get Public Key| C
-    F -->|Return JWKS| E
+sequenceDiagram
+    participant Client as AWS Workload
+    participant TokenLambda as Token Exchange Lambda
+    participant STS as AWS STS
+    participant KMS as AWS KMS
+    participant Consumer as OIDC Consumer<br/>(e.g. Tailscale)
+    participant JWKSLambda as JWKS Lambda
+
+    Note over Client,Consumer: Token Generation
+    Client->>TokenLambda: POST /token<br/>{access_key, secret_key, session_token}
+    TokenLambda->>STS: GetCallerIdentity(credentials)
+    STS-->>TokenLambda: {Account, ARN, UserId}
+    TokenLambda->>TokenLambda: Build JWT claims
+    TokenLambda->>KMS: Sign(JWT header + payload)
+    KMS-->>TokenLambda: Signature
+    TokenLambda-->>Client: OIDC Token (JWT)
+
+    Note over Client,Consumer: Token Verification
+    Client->>Consumer: Authenticate with token
+    Consumer->>JWKSLambda: GET /.well-known/jwks.json
+    JWKSLambda->>KMS: GetPublicKey()
+    KMS-->>JWKSLambda: Public key (DER)
+    JWKSLambda-->>Consumer: JWKS (JSON)
+    Consumer->>Consumer: Verify token signature<br/>Validate claims
+    Consumer-->>Client: Access granted
 ```
 
 ### Components
