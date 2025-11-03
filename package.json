@@ -4,22 +4,32 @@
   "description": "Exchange AWS authentication for OIDC tokens using KMS-backed signing",
   "main": "index.js",
   "type": "module",
+  "bin": {
+    "aws-oidc-token": "./client.js"
+  },
   "scripts": {
     "test": "node --test test/*.test.js",
     "test:watch": "node --test --watch test/*.test.js",
+    "test:unit": "node --test test/token-exchange.test.js test/jwks.test.js test/discovery.test.js",
+    "test:integration": "node --test test/integration.test.js",
     "deploy": "./deploy.sh",
-    "destroy": "./destroy.sh"
+    "destroy": "./destroy.sh",
+    "get-token": "node client.js"
   },
   "keywords": [
     "aws",
     "oidc",
     "workload-identity",
     "kms",
-    "lambda"
+    "lambda",
+    "sigv4"
   ],
   "author": "",
   "license": "MIT",
-  "devDependencies": {
-    "@smithy/signature-v4": "^4.2.3"
+  "dependencies": {
+    "@aws-crypto/sha256-js": "^5.2.0",
+    "@aws-sdk/credential-provider-node": "^3.620.0",
+    "@smithy/protocol-http": "^4.1.4",
+    "@smithy/signature-v4": "^4.2.0"
   }
 }
