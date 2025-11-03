@@ -1,0 +1,25 @@
+{
+  "name": "aws-oidc-workload-identity",
+  "version": "1.0.0",
+  "description": "Exchange AWS authentication for OIDC tokens using KMS-backed signing",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "test": "node --test test/*.test.js",
+    "test:watch": "node --test --watch test/*.test.js",
+    "deploy": "./deploy.sh",
+    "destroy": "./destroy.sh"
+  },
+  "keywords": [
+    "aws",
+    "oidc",
+    "workload-identity",
+    "kms",
+    "lambda"
+  ],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "@smithy/signature-v4": "^4.2.3"
+  }
+}
