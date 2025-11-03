@@ -26,6 +26,20 @@ This enables AWS workloads to authenticate with services that require OIDC token
 
 ## Architecture
 
+### High-Level Architecture
+
+```mermaid
+graph TB
+    A[AWS Credentials] -->|STS Verify| B[Token Exchange Lambda]
+    B -->|Sign JWT| C[KMS]
+    C -->|Signature| B
+    B -->|Return| D[OIDC Token JWT]
+    D -->|Authenticate| E[OIDC Consumer<br/>e.g. Tailscale]
+    E -->|Verify Token| F[JWKS Lambda]
+    F -->|Get Public Key| C
+    F -->|Return JWKS| E
+```
+
 ### Token Exchange Flow
 
 ```mermaid
