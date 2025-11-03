@@ -1,17 +1,19 @@
 /**
  * Token Exchange Lambda
  *
- * Exchanges AWS authentication for OIDC tokens.
+ * Exchanges AWS SigV4 authenticated requests for OIDC tokens.
  *
  * Flow:
- * 1. Verify incoming AWS credentials via STS GetCallerIdentity
- * 2. Extract identity claims (ARN, account, user/role info)
+ * 1. Lambda Function URL validates SigV4 signature (automatic)
+ * 2. Extract identity from requestContext.authorizer.iam
  * 3. Generate JWT with standard OIDC claims
  * 4. Sign JWT using KMS asymmetric key
  * 5. Return signed token
+ *
+ * No credentials are transmitted - caller signs request with AWS SigV4,
+ * and Lambda runtime validates and provides identity information.
  */
 
-import { STSClient, GetCallerIdentityCommand } from '@aws-sdk/client-sts';
 import { KMSClient, SignCommand, GetPublicKeyCommand } from '@aws-sdk/client-kms';
 import crypto from 'crypto';
 
@@ -19,7 +21,6 @@ const KMS_KEY_ID = process.env.KMS_KEY_ID;
 const ISSUER = process.env.ISSUER; // e.g., https://your-domain.com
 const TOKEN_LIFETIME_SECONDS = parseInt(process.env.TOKEN_LIFETIME_SECONDS || '3600', 10);
 
-const stsClient = new STSClient({});
 const kmsClient = new KMSClient({});
 
 /**
@@ -66,25 +67,36 @@ async function signWithKMS(data) {
 }
 
 /**
- * Verify AWS credentials and get caller identity
+ * Extract identity from Lambda Function URL IAM auth context
  */
-async function verifyAWSCredentials(accessKeyId, secretAccessKey, sessionToken) {
-  // Create a temporary STS client with provided credentials
-  const tempStsClient = new STSClient({
-    credentials: {
-      accessKeyId,
-      secretAccessKey,
-      sessionToken
-    }
-  });
+function extractIdentity(event) {
+  const iamContext = event.requestContext?.authorizer?.iam;
 
-  const command = new GetCallerIdentityCommand({});
-  const identity = await tempStsClient.send(command);
+  if (!iamContext) {
+    throw new Error('Missing IAM authentication context. Ensure Function URL auth type is AWS_IAM.');
+  }
+
+  // Extract identity fields from IAM context
+  // These are provided by Lambda after validating the SigV4 signature
+  const {
+    userArn,
+    accountId,
+    userId,
+    callerId,
+    accessKey,
+    principalOrgId
+  } = iamContext;
+
+  if (!userArn || !accountId) {
+    throw new Error('Incomplete IAM authentication context');
+  }
 
   return {
-    account: identity.Account,
-    arn: identity.Arn,
-    userId: identity.UserId
+    arn: userArn,
+    account: accountId,
+    userId: userId || callerId,
+    accessKey,
+    principalOrgId
   };
 }
 
@@ -117,6 +129,14 @@ function parseIdentity(arn, userId) {
 }
 
 /**
+ * Get audience from request
+ */
+function getAudience(event) {
+  // Try query parameter first, then default to issuer
+  return event.queryStringParameters?.audience || ISSUER;
+}
+
+/**
  * Generate JWT
  */
 async function generateJWT(identity, audience) {
@@ -138,17 +158,26 @@ async function generateJWT(identity, audience) {
     // Standard OIDC claims
     iss: ISSUER,
     sub: identity.arn, // Subject: the AWS ARN
-    aud: audience || ISSUER,
+    aud: audience,
     iat: now,
     exp: now + TOKEN_LIFETIME_SECONDS,
 
-    // AWS-specific claims
+    // AWS-specific claims (from requestContext.authorizer.iam)
     'aws:account': identity.account,
     'aws:arn': identity.arn,
     'aws:userid': identity.userId,
     'aws:resource_type': parsedIdentity.resourceType,
     'aws:resource_name': parsedIdentity.resourceName
   };
+
+  // Add optional claims if present
+  if (identity.accessKey) {
+    claims['aws:access_key'] = identity.accessKey;
+  }
+
+  if (identity.principalOrgId) {
+    claims['aws:principal_org'] = identity.principalOrgId;
+  }
 
   // Encode header and payload
   const encodedHeader = base64url(JSON.stringify(header));
@@ -166,60 +195,27 @@ async function generateJWT(identity, audience) {
 }
 
 /**
- * Parse AWS credentials from request
- */
-function parseCredentials(event) {
-  // Support multiple input formats:
-  // 1. JSON body with credentials
-  // 2. Authorization header (AWS SigV4)
-  // 3. Query parameters
-
-  let body = {};
-  if (event.body) {
-    try {
-      body = JSON.parse(event.body);
-    } catch (e) {
-      // Not JSON, ignore
-    }
-  }
-
-  // Extract credentials from body or headers
-  const accessKeyId = body.access_key_id ||
-                      event.headers?.['x-aws-access-key-id'];
-  const secretAccessKey = body.secret_access_key ||
-                          event.headers?.['x-aws-secret-access-key'];
-  const sessionToken = body.session_token ||
-                       event.headers?.['x-aws-session-token'];
-  const audience = body.audience ||
-                   event.queryStringParameters?.audience;
-
-  if (!accessKeyId || !secretAccessKey) {
-    throw new Error('Missing AWS credentials');
-  }
-
-  return { accessKeyId, secretAccessKey, sessionToken, audience };
-}
-
-/**
  * Lambda handler
  */
 export async function handler(event) {
   console.log('Token exchange request received', {
     path: event.rawPath,
-    method: event.requestContext?.http?.method
+    method: event.requestContext?.http?.method,
+    hasIAMContext: !!event.requestContext?.authorizer?.iam
   });
 
   try {
-    // Parse credentials from request
-    const { accessKeyId, secretAccessKey, sessionToken, audience } = parseCredentials(event);
+    // Extract identity from IAM auth context
+    // Lambda has already validated the SigV4 signature
+    const identity = extractIdentity(event);
 
-    // Verify AWS credentials and get identity
-    const identity = await verifyAWSCredentials(accessKeyId, secretAccessKey, sessionToken);
-
-    console.log('Identity verified', {
+    console.log('Identity extracted from IAM context', {
       account: identity.account,
       arn: identity.arn
     });
+
+    // Get audience from request
+    const audience = getAudience(event);
 
     // Generate OIDC token
     const token = await generateJWT(identity, audience);
@@ -244,8 +240,16 @@ export async function handler(event) {
       stack: error.stack
     });
 
-    // Don't leak sensitive error details
-    const statusCode = error.name === 'InvalidClientTokenId' ? 401 : 500;
+    // Determine appropriate status code
+    let statusCode = 500;
+    let errorDescription = 'Token exchange failed';
+
+    if (error.message.includes('Missing IAM authentication') ||
+        error.message.includes('Incomplete IAM authentication')) {
+      statusCode = 401;
+      errorDescription = 'Missing or invalid IAM authentication. Ensure request is signed with AWS SigV4.';
+    }
+
     return {
       statusCode,
       headers: {
@@ -253,7 +257,7 @@ export async function handler(event) {
       },
       body: JSON.stringify({
         error: 'invalid_request',
-        error_description: statusCode === 401 ? 'Invalid AWS credentials' : 'Token exchange failed'
+        error_description: errorDescription
       })
     };
   }
