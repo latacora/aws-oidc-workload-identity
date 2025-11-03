@@ -6,21 +6,22 @@ AWS OIDC Workload Identity is designed to securely exchange AWS IAM credentials 
 
 ### Trust Model
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                        Trust Boundaries                      │
-└─────────────────────────────────────────────────────────────┘
+```mermaid
+graph LR
+    subgraph "Trust Boundaries"
+        A[AWS IAM<br/>Root of Trust for Identity]
+        B[AWS KMS<br/>Root of Trust for Cryptography]
+        C[OIDC Consumer<br/>e.g., Tailscale]
+    end
 
-1. AWS IAM: Root of trust for identity
-   └─> STS GetCallerIdentity: Verifies credentials
+    A -->|STS GetCallerIdentity<br/>Verifies credentials| D[Verified Identity]
+    B -->|Private key in HSM<br/>Signs JWTs RSA-2048| E[Signed Token]
+    E -->|JWKS public key| C
+    C -->|Validates claims<br/>Verifies signature| F[Authenticated Session]
 
-2. AWS KMS: Root of trust for cryptography
-   └─> Private key never leaves HSM
-   └─> Signs JWTs with RSA-2048
-
-3. OIDC Consumer (e.g., Tailscale): Trusts tokens
-   └─> Verifies signature using JWKS public key
-   └─> Validates claims and expiration
+    style A fill:#e1f5ff
+    style B fill:#ffe1e1
+    style C fill:#e1ffe1
 ```
 
 ### Security Properties

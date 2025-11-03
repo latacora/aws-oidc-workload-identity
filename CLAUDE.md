@@ -159,6 +159,20 @@ curl $(cat deployment-output.json | jq -r '.jwks_url') | jq
 - Follow principle of least privilege
 - Keep dependencies minimal
 
+### Documentation
+
+- Use Mermaid diagrams for all architecture and flow diagrams
+- Mermaid diagrams render natively in GitHub and are easier to maintain than ASCII art
+- Add colors to diagrams using `style` statements for better visual clarity
+- Keep diagrams simple and focused on one concept
+- Example:
+  ```mermaid
+  graph TD
+      A[Component A] -->|Action| B[Component B]
+      style A fill:#e1f5ff
+      style B fill:#ffe1e1
+  ```
+
 ## Deployment
 
 ### Deployment Script

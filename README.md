@@ -26,25 +26,21 @@ This enables AWS workloads to authenticate with services that require OIDC token
 
 ## Architecture
 
-```
-┌─────────────┐      ┌──────────────────┐      ┌─────────┐
-│   AWS       │      │  Token Exchange  │      │   KMS   │
-│ Credentials ├─────>│     Lambda       ├─────>│  Sign   │
-│             │      │                  │      │         │
-└─────────────┘      └────────┬─────────┘      └─────────┘
-                              │
-                              v
-                     ┌────────────────┐
-                     │  OIDC Token    │
-                     │  (JWT)         │
-                     └────────────────┘
-                              │
-                              v
-                     ┌────────────────┐      ┌─────────┐
-                     │   OIDC         │      │  JWKS   │
-                     │   Consumer ────┼─────>│ Lambda  │
-                     │   (Tailscale)  │      │         │
-                     └────────────────┘      └─────────┘
+```mermaid
+graph TB
+    A[AWS Credentials] -->|STS Verify| B[Token Exchange Lambda]
+    B -->|Sign JWT| C[KMS]
+    C -->|Signature| B
+    B -->|Return| D[OIDC Token JWT]
+    D -->|Authenticate| E[OIDC Consumer<br/>e.g. Tailscale]
+    E -->|Verify Token| F[JWKS Lambda]
+    F -->|Get Public Key| C
+    F -->|Return JWKS| E
+
+    style A fill:#e1f5ff
+    style C fill:#ffe1e1
+    style D fill:#e1ffe1
+    style E fill:#fff5e1
 ```
 
 ### Components
