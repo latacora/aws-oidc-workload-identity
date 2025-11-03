@@ -2,6 +2,17 @@
 
 Exchange AWS authentication for OIDC tokens using KMS-backed signing.
 
+## ⚠️ Experimental - Unreviewed Code
+
+**This project is experimental and has not undergone security review.** It is provided as a proof-of-concept implementation for exchanging AWS credentials for OIDC tokens. Before using in production:
+
+- Conduct a thorough security review
+- Test extensively in a non-production environment
+- Understand the security implications (see [SECURITY.md](./SECURITY.md))
+- Review open issues, particularly around token lifetime behavior (see issues)
+
+Use at your own risk. This is not production-ready software.
+
 ## Overview
 
 AWS provides a mechanism to exchange OIDC tokens for temporary AWS credentials (via `AssumeRoleWithWebIdentity`), but not the reverse: exchanging AWS credentials for OIDC tokens that external services can verify.
@@ -260,6 +271,7 @@ Estimated monthly cost for moderate usage (10k tokens/month): **~$1-2**
 3. **No Token Revocation**: Tokens are valid until expiration (no revocation list)
 4. **No Refresh Tokens**: Tokens must be reissued after expiration
 5. **Limited Rate Limiting**: Lambda Function URLs have basic throttling but no sophisticated rate limiting
+6. **Token Lifetime Semantics Unclear**: The relationship between OIDC token lifetime and resulting credential lifetime in consumer systems is not well-defined (see issue #1)
 
 ## Cleanup
 
