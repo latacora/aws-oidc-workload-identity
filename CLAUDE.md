@@ -173,11 +173,16 @@ curl $(cat deployment-output.json | jq -r '.jwks_url') | jq
 
 ### Shell Scripts
 
-- All shell scripts must pass `shellcheck` with no warnings
-- Run `shellcheck script.sh` before committing
-- Quote all variable expansions: `"$VAR"` not `$VAR`
-- Use `read -r` instead of `read` to avoid mangling backslashes
-- Document any shellcheck disable directives with comments explaining why
+- Run `shellcheck` on all shell scripts before committing
+- Consider shellcheck suggestions carefully - they're usually right, but not always
+- shellcheck's purpose is to flag potential issues; you decide which to address
+- **Always document exceptions**: If you use `# shellcheck disable=SCXXXX`, explain why
+- Common legitimate exceptions:
+  - SC2034 (unused variable): Variable captured for side effects or debugging
+  - SC2086 (unquoted expansion): Intentional word splitting (rare)
+  - SC2046 (quote command substitution): When splitting is desired
+- Do NOT add blanket disables at the file level - be specific about each exception
+- shellcheck is not infallible - use judgment and document your reasoning
 
 ## Deployment
 
