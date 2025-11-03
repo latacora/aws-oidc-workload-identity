@@ -18,10 +18,6 @@ graph LR
     B -->|Private key in HSM<br/>Signs JWTs RSA-2048| E[Signed Token]
     E -->|JWKS public key| C
     C -->|Validates claims<br/>Verifies signature| F[Authenticated Session]
-
-    style A fill:#e1f5ff
-    style B fill:#ffe1e1
-    style C fill:#e1ffe1
 ```
 
 ### Security Properties

@@ -163,15 +163,21 @@ curl $(cat deployment-output.json | jq -r '.jwks_url') | jq
 
 - Use Mermaid diagrams for all architecture and flow diagrams
 - Mermaid diagrams render natively in GitHub and are easier to maintain than ASCII art
-- Add colors to diagrams using `style` statements for better visual clarity
+- Do NOT add color styling - colors are illegible on GitHub's dark theme
 - Keep diagrams simple and focused on one concept
 - Example:
   ```mermaid
   graph TD
       A[Component A] -->|Action| B[Component B]
-      style A fill:#e1f5ff
-      style B fill:#ffe1e1
   ```
+
+### Shell Scripts
+
+- All shell scripts must pass `shellcheck` with no warnings
+- Run `shellcheck script.sh` before committing
+- Quote all variable expansions: `"$VAR"` not `$VAR`
+- Use `read -r` instead of `read` to avoid mangling backslashes
+- Document any shellcheck disable directives with comments explaining why
 
 ## Deployment
 

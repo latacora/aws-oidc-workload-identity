@@ -36,11 +36,6 @@ graph TB
     E -->|Verify Token| F[JWKS Lambda]
     F -->|Get Public Key| C
     F -->|Return JWKS| E
-
-    style A fill:#e1f5ff
-    style C fill:#ffe1e1
-    style D fill:#e1ffe1
-    style E fill:#fff5e1
 ```
 
 ### Components

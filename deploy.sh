@@ -44,10 +44,10 @@ if [ -z "$KMS_KEY_ID" ]; then
     --key-usage SIGN_VERIFY \
     --key-spec RSA_2048 \
     --description "OIDC token signing key for $STACK_NAME" \
-    --tags TagKey=Project,TagValue=$STACK_NAME \
+    --tags TagKey=Project,TagValue="$STACK_NAME" \
     --query KeyMetadata.KeyId \
     --output text \
-    --region $REGION)
+    --region "$REGION")
 
   echo "Created KMS key: $KMS_KEY_ID"
 
@@ -55,7 +55,7 @@ if [ -z "$KMS_KEY_ID" ]; then
   aws kms create-alias \
     --alias-name "alias/$STACK_NAME" \
     --target-key-id "$KMS_KEY_ID" \
-    --region $REGION
+    --region "$REGION"
 
   echo "Created alias: alias/$STACK_NAME"
 else
@@ -95,13 +95,13 @@ EOF
     --role-name "$ROLE_NAME" \
     --assume-role-policy-document file:///tmp/trust-policy.json \
     --description "Execution role for $STACK_NAME Lambda functions" \
-    --region $REGION
+    --region "$REGION"
 
   # Attach basic Lambda execution policy
   aws iam attach-role-policy \
     --role-name "$ROLE_NAME" \
     --policy-arn "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole" \
-    --region $REGION
+    --region "$REGION"
 
   # Create and attach custom policy for KMS and STS
   cat > /tmp/lambda-policy.json <<EOF
@@ -131,7 +131,7 @@ EOF
     --role-name "$ROLE_NAME" \
     --policy-name "${STACK_NAME}-permissions" \
     --policy-document file:///tmp/lambda-policy.json \
-    --region $REGION
+    --region "$REGION"
 
   echo "Waiting 10 seconds for IAM role to propagate..."
   sleep 10
@@ -180,17 +180,17 @@ echo -e "${YELLOW}Step 4: Deploying Lambda functions...${NC}"
 LAMBDA_TOKEN_NAME="${STACK_NAME}-token-exchange"
 echo "Deploying token-exchange Lambda..."
 
-if aws lambda get-function --function-name "$LAMBDA_TOKEN_NAME" --region $REGION 2>/dev/null; then
+if aws lambda get-function --function-name "$LAMBDA_TOKEN_NAME" --region "$REGION" 2>/dev/null; then
   echo "Updating existing function..."
   aws lambda update-function-code \
     --function-name "$LAMBDA_TOKEN_NAME" \
     --zip-file fileb://.deploy/token-exchange.zip \
-    --region $REGION > /dev/null
+    --region "$REGION" > /dev/null
 
   aws lambda update-function-configuration \
     --function-name "$LAMBDA_TOKEN_NAME" \
     --environment "Variables={KMS_KEY_ID=$KMS_KEY_ID,ISSUER=$ISSUER,TOKEN_LIFETIME_SECONDS=3600}" \
-    --region $REGION > /dev/null
+    --region "$REGION" > /dev/null
 else
   echo "Creating new function..."
   aws lambda create-function \
@@ -202,16 +202,19 @@ else
     --environment "Variables={KMS_KEY_ID=$KMS_KEY_ID,ISSUER=$ISSUER,TOKEN_LIFETIME_SECONDS=3600}" \
     --timeout 30 \
     --memory-size 256 \
-    --region $REGION > /dev/null
+    --region "$REGION" > /dev/null
 
   # Wait for function to be active
-  aws lambda wait function-active --function-name "$LAMBDA_TOKEN_NAME" --region $REGION
+  aws lambda wait function-active --function-name "$LAMBDA_TOKEN_NAME" --region "$REGION"
 
   # Create function URL
+  # SC2034: Variable appears unused. We capture the output for potential debugging
+  # but only need the side effect (creating the URL). The URL is retrieved separately.
+  # shellcheck disable=SC2034
   TOKEN_URL_CONFIG=$(aws lambda create-function-url-config \
     --function-name "$LAMBDA_TOKEN_NAME" \
     --auth-type NONE \
-    --region $REGION)
+    --region "$REGION")
 
   # Add permission for function URL
   aws lambda add-permission \
@@ -220,13 +223,13 @@ else
     --action lambda:InvokeFunctionUrl \
     --principal "*" \
     --function-url-auth-type NONE \
-    --region $REGION > /dev/null 2>&1 || true
+    --region "$REGION" > /dev/null 2>&1 || true
 fi
 
 # Get function URL
 TOKEN_URL=$(aws lambda get-function-url-config \
   --function-name "$LAMBDA_TOKEN_NAME" \
-  --region $REGION \
+  --region "$REGION" \
   --query FunctionUrl \
   --output text)
 
@@ -236,17 +239,17 @@ echo "Token Exchange URL: $TOKEN_URL"
 LAMBDA_JWKS_NAME="${STACK_NAME}-jwks"
 echo "Deploying JWKS Lambda..."
 
-if aws lambda get-function --function-name "$LAMBDA_JWKS_NAME" --region $REGION 2>/dev/null; then
+if aws lambda get-function --function-name "$LAMBDA_JWKS_NAME" --region "$REGION" 2>/dev/null; then
   echo "Updating existing function..."
   aws lambda update-function-code \
     --function-name "$LAMBDA_JWKS_NAME" \
     --zip-file fileb://.deploy/jwks.zip \
-    --region $REGION > /dev/null
+    --region "$REGION" > /dev/null
 
   aws lambda update-function-configuration \
     --function-name "$LAMBDA_JWKS_NAME" \
     --environment "Variables={KMS_KEY_ID=$KMS_KEY_ID}" \
-    --region $REGION > /dev/null
+    --region "$REGION" > /dev/null
 else
   echo "Creating new function..."
   aws lambda create-function \
@@ -258,16 +261,19 @@ else
     --environment "Variables={KMS_KEY_ID=$KMS_KEY_ID}" \
     --timeout 30 \
     --memory-size 128 \
-    --region $REGION > /dev/null
+    --region "$REGION" > /dev/null
 
   # Wait for function to be active
-  aws lambda wait function-active --function-name "$LAMBDA_JWKS_NAME" --region $REGION
+  aws lambda wait function-active --function-name "$LAMBDA_JWKS_NAME" --region "$REGION"
 
   # Create function URL
+  # SC2034: Variable appears unused. We capture the output for potential debugging
+  # but only need the side effect (creating the URL). The URL is retrieved separately.
+  # shellcheck disable=SC2034
   JWKS_URL_CONFIG=$(aws lambda create-function-url-config \
     --function-name "$LAMBDA_JWKS_NAME" \
     --auth-type NONE \
-    --region $REGION)
+    --region "$REGION")
 
   # Add permission for function URL
   aws lambda add-permission \
@@ -276,13 +282,13 @@ else
     --action lambda:InvokeFunctionUrl \
     --principal "*" \
     --function-url-auth-type NONE \
-    --region $REGION > /dev/null 2>&1 || true
+    --region "$REGION" > /dev/null 2>&1 || true
 fi
 
 # Get function URL
 JWKS_URL=$(aws lambda get-function-url-config \
   --function-name "$LAMBDA_JWKS_NAME" \
-  --region $REGION \
+  --region "$REGION" \
   --query FunctionUrl \
   --output text)
 

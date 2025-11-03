@@ -17,14 +17,11 @@ echo "Stack Name: $STACK_NAME"
 echo "Region: $REGION"
 echo ""
 
-read -p "Are you sure you want to destroy all resources? (yes/no): " confirm
+read -r -p "Are you sure you want to destroy all resources? (yes/no): " confirm
 if [ "$confirm" != "yes" ]; then
   echo "Cleanup cancelled"
   exit 0
 fi
-
-# Get AWS account ID
-ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
 
 # Step 1: Delete Lambda functions
 echo -e "${YELLOW}Step 1: Deleting Lambda functions...${NC}"
@@ -38,12 +35,12 @@ for LAMBDA_NAME in "$LAMBDA_TOKEN_NAME" "$LAMBDA_JWKS_NAME"; do
   # Delete function URL config if exists
   aws lambda delete-function-url-config \
     --function-name "$LAMBDA_NAME" \
-    --region $REGION 2>/dev/null || true
+    --region "$REGION" 2>/dev/null || true
 
   # Delete function
   aws lambda delete-function \
     --function-name "$LAMBDA_NAME" \
-    --region $REGION 2>/dev/null || true
+    --region "$REGION" 2>/dev/null || true
 done
 
 echo "Lambda functions deleted"
@@ -58,18 +55,18 @@ ROLE_NAME="${STACK_NAME}-lambda-role"
 aws iam detach-role-policy \
   --role-name "$ROLE_NAME" \
   --policy-arn "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole" \
-  --region $REGION 2>/dev/null || true
+  --region "$REGION" 2>/dev/null || true
 
 # Delete inline policies
 aws iam delete-role-policy \
   --role-name "$ROLE_NAME" \
   --policy-name "${STACK_NAME}-permissions" \
-  --region $REGION 2>/dev/null || true
+  --region "$REGION" 2>/dev/null || true
 
 # Delete role
 aws iam delete-role \
   --role-name "$ROLE_NAME" \
-  --region $REGION 2>/dev/null || true
+  --region "$REGION" 2>/dev/null || true
 
 echo "IAM role deleted"
 echo ""
@@ -77,19 +74,19 @@ echo ""
 # Step 3: Delete KMS key (schedule deletion)
 echo -e "${YELLOW}Step 3: Scheduling KMS key deletion...${NC}"
 
-KMS_KEY_ID=$(aws kms list-aliases --query "Aliases[?AliasName=='alias/$STACK_NAME'].TargetKeyId" --output text --region $REGION)
+KMS_KEY_ID=$(aws kms list-aliases --query "Aliases[?AliasName=='alias/$STACK_NAME'].TargetKeyId" --output text --region "$REGION")
 
 if [ -n "$KMS_KEY_ID" ]; then
   # Delete alias first
   aws kms delete-alias \
     --alias-name "alias/$STACK_NAME" \
-    --region $REGION 2>/dev/null || true
+    --region "$REGION" 2>/dev/null || true
 
   # Schedule key deletion (minimum 7 days)
   aws kms schedule-key-deletion \
     --key-id "$KMS_KEY_ID" \
     --pending-window-in-days 7 \
-    --region $REGION 2>/dev/null || true
+    --region "$REGION" 2>/dev/null || true
 
   echo "KMS key scheduled for deletion in 7 days: $KMS_KEY_ID"
   echo "To cancel: aws kms cancel-key-deletion --key-id $KMS_KEY_ID --region $REGION"

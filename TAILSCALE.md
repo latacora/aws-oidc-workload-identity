@@ -25,11 +25,6 @@ graph TD
     A[AWS Workload<br/>EC2, Lambda, ECS, etc.] -->|AWS IAM Credentials| B[Token Exchange Lambda]
     B -->|OIDC Token JWT| C[Tailscale Workload Identity]
     C -->|Tailscale Node Key| D[Tailscale Network]
-
-    style A fill:#e1f5ff
-    style B fill:#ffe1e1
-    style C fill:#e1ffe1
-    style D fill:#fff5e1
 ```
 
 ## Step 1: Configure Tailscale OIDC Provider
