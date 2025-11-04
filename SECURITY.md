@@ -405,23 +405,6 @@ npm audit fix
 npm update
 ```
 
-#### 4. Implement Security Headers
-
-```javascript
-return {
-  statusCode: 200,
-  headers: {
-    'Content-Type': 'application/json',
-    'Cache-Control': 'no-store',
-    'Pragma': 'no-cache',
-    'X-Content-Type-Options': 'nosniff',
-    'X-Frame-Options': 'DENY',
-    'Strict-Transport-Security': 'max-age=31536000; includeSubDomains'
-  },
-  body: JSON.stringify(response)
-};
-```
-
 ## Known Security Limitations
 
 ### 1. No Token Revocation
