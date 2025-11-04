@@ -15,8 +15,10 @@ aws-oidc-workload-identity/
 │   ├── token-exchange.test.js
 │   ├── jwks.test.js
 │   └── integration.test.js
+├── docs/
+│   ├── tailscale.md        # Tailscale integration guide
+│   └── client.md           # Client usage guide
 ├── README.md               # User documentation
-├── TAILSCALE.md            # Tailscale integration guide
 ├── SECURITY.md             # Security considerations
 └── CLAUDE.md               # This file
 ```
@@ -490,7 +492,7 @@ Potential improvements for future versions:
 
 For issues and questions:
 
-1. Check [README.md](./README.md) and [TAILSCALE.md](./TAILSCALE.md)
+1. Check [README.md](./README.md) and [docs/tailscale.md](./docs/tailscale.md)
 2. Review [SECURITY.md](./SECURITY.md) for security concerns
 3. Search existing GitHub issues
 4. Create new issue with:
