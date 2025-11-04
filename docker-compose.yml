@@ -1,0 +1,49 @@
+version: '3.8'
+
+services:
+  # OIDC token fetcher sidecar
+  oidc-token:
+    build: .
+    environment:
+      # AWS credentials (from environment or IAM role)
+      - AWS_ACCESS_KEY_ID
+      - AWS_SECRET_ACCESS_KEY
+      - AWS_SESSION_TOKEN
+      - AWS_REGION=${AWS_REGION:-us-east-1}
+      # Token endpoint
+      - TOKEN_URL
+      - AUDIENCE=${AUDIENCE:-tailscale}
+    command: >
+      sh -c '
+      while true; do
+        echo "Fetching OIDC token...";
+        node client.js $$TOKEN_URL $$AUDIENCE > /tmp/token.json 2>&1;
+        if [ $$? -eq 0 ]; then
+          echo "Token fetched successfully";
+          cat /tmp/token.json;
+        else
+          echo "Failed to fetch token";
+          cat /tmp/token.json;
+        fi;
+        sleep 3000;
+      done'
+    volumes:
+      - token-data:/tmp
+    restart: unless-stopped
+
+  # Example: Tailscale sidecar that uses the token
+  # tailscale:
+  #   image: tailscale/tailscale:latest
+  #   environment:
+  #     - TS_AUTHKEY=file:///tmp/oidc-token
+  #   volumes:
+  #     - token-data:/tmp
+  #     - /dev/net/tun:/dev/net/tun
+  #   cap_add:
+  #     - NET_ADMIN
+  #   depends_on:
+  #     - oidc-token
+  #   restart: unless-stopped
+
+volumes:
+  token-data:
