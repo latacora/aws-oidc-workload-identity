@@ -13,16 +13,44 @@ Exchange AWS authentication for OIDC tokens using KMS-backed signing.
 
 Use at your own risk. This is not production-ready software.
 
-## Overview
+## What is Workload Identity?
 
-AWS provides a mechanism to exchange OIDC tokens for temporary AWS credentials (via `AssumeRoleWithWebIdentity`), but not the reverse: exchanging AWS credentials for OIDC tokens that external services can verify.
+**Workload identity** allows services and applications (workloads) to authenticate themselves using cryptographically verifiable tokens instead of long-lived secrets. Each workload gets a unique identity that can be verified without sharing credentials.
 
-This project implements a minimal, secure solution for AWS-to-OIDC token exchange using:
+### Why Use Workload Identity?
+
+Traditional authentication with static API keys or passwords has significant drawbacks:
+- **Long-lived secrets** that can be stolen or leaked
+- **Manual rotation** is error-prone and disruptive
+- **Hard to audit** who accessed what and when
+- **Difficult to revoke** without breaking other systems
+
+Workload identity solves these problems:
+- ✅ **Short-lived tokens** (typically 1 hour) that automatically expire
+- ✅ **Cryptographic verification** prevents token forgery
+- ✅ **Fine-grained access control** based on verified identity claims
+- ✅ **Automatic rotation** - no manual credential management
+- ✅ **Complete audit trail** of authentication attempts
+- ✅ **Instant revocation** by changing policy, not rotating secrets
+
+### The Problem: AWS ↔ OIDC Gap
+
+AWS provides excellent support for **OIDC → AWS** authentication (via `AssumeRoleWithWebIdentity`), allowing external OIDC tokens to access AWS resources. However, **AWS does not provide the reverse**: a way for AWS workloads to get OIDC tokens that external services can verify.
+
+This creates a gap: Your AWS workloads (EC2, ECS, Lambda) have strong IAM-based identities, but they can't use them to authenticate with services that require OIDC tokens.
+
+### This Project: Bridging the Gap
+
+This project implements a minimal, secure **AWS → OIDC** token exchange service using:
 - **AWS KMS** for cryptographic signing (private key never leaves AWS)
 - **AWS Lambda** with Function URLs for serverless endpoints
-- **AWS STS** for credential verification
+- **AWS SigV4** authentication (no credentials transmitted)
 
-This enables AWS workloads to authenticate with services that require OIDC tokens, such as [Tailscale Workload Identity](https://tailscale.com/blog/workload-identity-beta).
+Your AWS workloads can now authenticate with any OIDC-compatible service, such as:
+- [Tailscale Workload Identity](https://tailscale.com/blog/workload-identity-beta) - zero-trust networking
+- [HashiCorp Vault](https://www.vaultproject.io/) - secrets management
+- [Kubernetes](https://kubernetes.io/docs/reference/access-authn-authz/authentication/#openid-connect-tokens) - container orchestration
+- Any service accepting OIDC tokens
 
 ## Architecture
 

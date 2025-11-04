@@ -1,16 +1,8 @@
 # Tailscale Workload Identity Integration
 
-This guide explains how to integrate AWS OIDC Workload Identity with [Tailscale Workload Identity](https://tailscale.com/blog/workload-identity-beta).
+This guide shows how to configure [Tailscale Workload Identity](https://tailscale.com/blog/workload-identity-beta) to authenticate AWS workloads using OIDC tokens generated from their AWS IAM identities.
 
-## Overview
-
-Tailscale Workload Identity allows services to authenticate to Tailscale using OIDC tokens instead of auth keys. This provides:
-- Cryptographically strong identity verification
-- Short-lived credentials (no long-lived secrets)
-- Fine-grained access control based on identity claims
-- Automatic credential rotation
-
-By combining AWS OIDC Workload Identity with Tailscale, your AWS workloads can securely authenticate to Tailscale using their AWS IAM identity.
+Instead of using long-lived Tailscale auth keys, your EC2 instances, ECS tasks, and Lambda functions can authenticate to Tailscale using their native AWS identity.
 
 ## Prerequisites
 
