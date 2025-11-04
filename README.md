@@ -64,6 +64,19 @@ Note: Some systems play both roles. For example, Google Cloud acts as both an OP
 
 **This project is an OpenID Provider** - it issues OIDC tokens that assert AWS identities. These tokens can then be used to authenticate with any Relying Party that accepts them.
 
+#### Relevant Specifications
+
+This project implements:
+- **[OpenID Connect Core 1.0](https://openid.net/specs/openid-connect-core-1_0.html)** - Defines OP and RP roles, ID Token format, and authentication flows
+- **[OpenID Connect Discovery 1.0](https://openid.net/specs/openid-connect-discovery-1_0.html)** - Defines the `.well-known/openid-configuration` endpoint (optional but implemented)
+- **[RFC 7519 (JWT)](https://www.rfc-editor.org/rfc/rfc7519)** - JSON Web Token format and claims
+- **[RFC 7518 (JWA)](https://www.rfc-editor.org/rfc/rfc7518)** - JSON Web Algorithms (signing algorithms)
+  - Requires support for RS256 (RSASSA-PKCS1-v1_5 with SHA-256)
+  - Recommends ES256 (ECDSA with P-256 and SHA-256)
+- **[RFC 7517 (JWK)](https://www.rfc-editor.org/rfc/rfc7517)** - JSON Web Key format for JWKS endpoint
+
+This project currently implements **RS256** signing, which is the default algorithm recommended by the OIDC specification and required by RFC 7518.
+
 ### The Problem: AWS ↔ OIDC Gap
 
 AWS provides excellent support for **OIDC → AWS** authentication (via `AssumeRoleWithWebIdentity`), allowing external OIDC tokens to access AWS resources. In this scenario, **AWS acts as a Relying Party** - it accepts and verifies OIDC tokens from external OpenID Providers.
@@ -95,7 +108,7 @@ graph TB
     B -->|Sign JWT| C[KMS]
     C -->|Signature| B
     B -->|Return| D[OIDC Token JWT]
-    D -->|Authenticate| E[OIDC Consumer<br/>e.g. Tailscale]
+    D -->|Authenticate| E[Relying Party<br/>e.g. Tailscale]
     E -->|Verify Token| F[JWKS Lambda]
     F -->|Get Public Key| C
     F -->|Return JWKS| E
@@ -108,7 +121,7 @@ sequenceDiagram
     participant Client as AWS Workload
     participant TokenLambda as Token Exchange Lambda<br/>(IAM Auth)
     participant KMS as AWS KMS
-    participant Consumer as OIDC Consumer<br/>(e.g. Tailscale)
+    participant RP as Relying Party<br/>(e.g. Tailscale)
     participant Discovery as Discovery Endpoint
     participant JWKSLambda as JWKS Lambda
 
@@ -121,16 +134,16 @@ sequenceDiagram
     KMS-->>TokenLambda: Signature
     TokenLambda-->>Client: OIDC Token (JWT)
 
-    Note over Consumer,JWKSLambda: Token Verification (Consumer Side)
-    Consumer->>Discovery: GET /.well-known/openid-configuration
-    Discovery-->>Consumer: {issuer, jwks_uri, ...}
-    Client->>Consumer: Authenticate with token
-    Consumer->>JWKSLambda: GET jwks_uri
+    Note over RP,JWKSLambda: Token Verification (Relying Party Side)
+    RP->>Discovery: GET /.well-known/openid-configuration
+    Discovery-->>RP: {issuer, jwks_uri, ...}
+    Client->>RP: Authenticate with token
+    RP->>JWKSLambda: GET jwks_uri
     JWKSLambda->>KMS: GetPublicKey()
     KMS-->>JWKSLambda: Public key (DER)
-    JWKSLambda-->>Consumer: JWKS (JSON)
-    Consumer->>Consumer: Verify signature<br/>Validate claims & expiry
-    Consumer-->>Client: Access granted
+    JWKSLambda-->>RP: JWKS (JSON)
+    RP->>RP: Verify signature<br/>Validate claims & expiry
+    RP-->>Client: Access granted
 ```
 
 ### Components
@@ -150,12 +163,12 @@ sequenceDiagram
 
 3. **JWKS Lambda** (`/jwks.json` endpoint, public)
    - Exposes KMS public key in JWKS format
-   - Used by OIDC consumers to verify tokens
+   - Used by Relying Parties to verify tokens
    - Cached for performance
 
 4. **Discovery Lambda** (`/.well-known/openid-configuration` endpoint, public)
    - OIDC Discovery document for auto-configuration
-   - Allows consumers like Tailscale to discover JWKS URL
+   - Allows Relying Parties like Tailscale to discover JWKS URL
    - Lists supported algorithms and claims
 
 ## Security Properties
@@ -284,7 +297,7 @@ The generated JWT includes:
 
 ### Verifying Tokens
 
-OIDC consumers can verify tokens using the JWKS endpoint:
+Relying Parties can verify tokens using the JWKS endpoint:
 
 ```bash
 curl https://your-jwks-url/
@@ -395,6 +408,41 @@ Estimated monthly cost for moderate usage (10k tokens/month): **~$1-2**
 
 ## Security Considerations
 
+### Authorization Model
+
+**This service is a domain bridge, not an authorization control.**
+
+Any authenticated AWS identity that can invoke the token exchange Lambda can request a token for any audience. The service does not restrict which audiences a caller can request or enforce access policies. This is by design.
+
+**How Authorization Works:**
+
+1. **Identity Bridge**: This service translates AWS IAM identity into OIDC tokens
+2. **Audience Claim**: The caller specifies the intended audience (e.g., `tailscale`, `vault`)
+3. **No Enforcement Here**: This service does not validate whether the caller should access that audience
+4. **Authorization at Consumer**: The Relying Party (OIDC consumer) makes authorization decisions based on:
+   - Token signature verification (proves token authenticity)
+   - Claims validation (identity, audience, expiration)
+   - Their own access policies (e.g., Tailscale ACLs, Vault policies)
+
+**Example:**
+
+An AWS role `arn:aws:iam::123456789012:role/WebApp` can request tokens for any audience:
+- `audience=tailscale` → Token with `aud: tailscale`
+- `audience=vault` → Token with `aud: vault`
+- `audience=custom-service` → Token with `aud: custom-service`
+
+Each OIDC consumer decides whether to accept the token based on their policies. Tailscale might grant access based on AWS account/role claims, while Vault might have different requirements.
+
+**Security Implications:**
+
+- ✅ Restricting Lambda access controls who can get tokens at all
+- ✅ Token claims accurately represent the AWS identity
+- ✅ Short-lived tokens limit exposure if intercepted
+- ❌ Cannot prevent an authenticated identity from requesting any audience
+- ❌ Cannot enforce "which AWS roles can access which services" at token issuance
+
+This matches how other identity providers work (Google Cloud, GitHub Actions) - they issue tokens with verified identity claims, and consumers make authorization decisions.
+
 ### Threat Model
 
 **Protected Against:**
@@ -405,7 +453,7 @@ Estimated monthly cost for moderate usage (10k tokens/month): **~$1-2**
 
 **Not Protected Against:**
 - Credential theft (if AWS credentials are stolen, attacker can get tokens)
-- OIDC consumer compromise (tokens are valid if consumer is compromised)
+- Relying Party compromise (tokens are valid if RP is compromised)
 - Token interception (use HTTPS for all communications)
 
 ### Best Practices
@@ -425,7 +473,7 @@ Estimated monthly cost for moderate usage (10k tokens/month): **~$1-2**
 3. **No Token Revocation**: Tokens are valid until expiration (no revocation list)
 4. **No Refresh Tokens**: Tokens must be reissued after expiration
 5. **Limited Rate Limiting**: Lambda Function URLs have basic throttling but no sophisticated rate limiting
-6. **Token Lifetime Semantics Unclear**: The relationship between OIDC token lifetime and resulting credential lifetime in consumer systems is not well-defined (see issue #1)
+6. **Token Lifetime Semantics Unclear**: The relationship between OIDC token lifetime and resulting credential lifetime in Relying Party systems is not well-defined (see issue #1)
 
 ## Cleanup
 

@@ -33,6 +33,70 @@ graph LR
 - Protection against credential theft (if AWS creds stolen, attacker can get tokens)
 - Token revocation (no revocation mechanism)
 - Protection after token interception (use HTTPS)
+- Audience-based authorization enforcement (see Authorization Boundaries below)
+
+### Authorization Boundaries
+
+**This service is a domain bridge, not an authorization control.**
+
+**What This Service Does:**
+- Authenticates AWS IAM identities via SigV4
+- Translates verified AWS identity into OIDC token claims
+- Signs tokens cryptographically with KMS
+- Includes caller-specified audience in token claims
+
+**What This Service Does NOT Do:**
+- Validate whether a caller should access a specific audience
+- Enforce policies like "Role X can only request audience Y"
+- Restrict which audiences can be requested
+- Make authorization decisions about service access
+
+**Authorization Flow:**
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│ This Service (Identity Bridge)                              │
+│                                                              │
+│ Input:  AWS IAM identity + audience claim                   │
+│ Output: Signed OIDC token with verified identity claims     │
+│                                                              │
+│ ✅ Verifies: "This is really AWS role X"                    │
+│ ❌ Does NOT verify: "Role X should access service Y"        │
+└─────────────────────────────────────────────────────────────┘
+                          │
+                          ▼
+┌─────────────────────────────────────────────────────────────┐
+│ OIDC Consumer / Relying Party (Authorization)               │
+│                                                              │
+│ - Verifies token signature (authenticity)                   │
+│ - Validates claims (issuer, audience, expiration)           │
+│ - Applies access policies based on identity claims          │
+│                                                              │
+│ ✅ Decides: "Role X with these claims can/cannot access"    │
+└─────────────────────────────────────────────────────────────┘
+```
+
+**Example:**
+
+An AWS role `arn:aws:iam::123456789012:role/DatabaseWorker` can request:
+- `audience=tailscale` → Gets valid token with `aud: tailscale`
+- `audience=vault` → Gets valid token with `aud: vault`
+- `audience=anything` → Gets valid token with `aud: anything`
+
+The OIDC consumer (Tailscale, Vault, etc.) decides whether to grant access based on:
+- Token signature verification (proves authenticity)
+- Audience claim matching their expected value
+- Other claims (AWS account, role name, etc.) matching their policies
+- Their own authorization rules (ACLs, policies, etc.)
+
+**Security Implications:**
+
+1. **Access Control Point**: Use IAM policies to restrict which identities can invoke the token exchange Lambda
+2. **Audience is an Assertion**: The audience claim is the caller's statement of intent, not an enforced restriction
+3. **Trust the Consumer**: OIDC consumers must implement their own authorization logic
+4. **Monitor Patterns**: Watch CloudWatch logs for suspicious audience patterns or token usage
+
+**This matches standard OIDC provider behavior**: Google Cloud Workload Identity, GitHub Actions OIDC, and other identity providers issue tokens for any audience requested by authenticated callers. Authorization enforcement happens at the Relying Party.
 
 ## Threat Model
 
