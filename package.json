@@ -31,5 +31,8 @@
     "@aws-sdk/credential-provider-node": "^3.620.0",
     "@smithy/protocol-http": "^4.1.4",
     "@smithy/signature-v4": "^4.2.0"
+  },
+  "devDependencies": {
+    "@aws-sdk/client-kms": "^3.620.0"
   }
 }
