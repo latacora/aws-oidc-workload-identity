@@ -35,7 +35,7 @@ Workload identity solves these problems:
 
 ### Understanding OIDC Roles
 
-**Workload identity is a general security concept, not an OIDC-specific specification.** It can be implemented using various protocols, including OIDC, SPIFFE, or custom solutions. This project uses OIDC because it's a widely-supported open standard.
+Workload identity is a general security concept, not an OIDC-specific specification. It can be implemented using various protocols, including OIDC, SPIFFE, or custom solutions. This project uses OIDC because it's a widely-supported open standard. This project was sparked by Tailscale launching Workload Identity, which is based on OIDC.
 
 In OIDC-based workload identity, there are two key roles defined by the [OpenID Connect specification](https://openid.net/specs/openid-connect-core-1_0.html):
 
@@ -44,10 +44,11 @@ In OIDC-based workload identity, there are two key roles defined by the [OpenID 
 - May provide a JWKS endpoint with public keys for verification (optional per spec, but commonly expected)
 - May provide a discovery endpoint at `.well-known/openid-configuration` (optional per spec, but commonly expected)
 - Examples for workload identity:
-  - **This project** (issues OIDC tokens for AWS workloads)
   - **GitHub Actions** (issues OIDC tokens for CI/CD workflows)
   - **Google Cloud** (issues ID tokens for service accounts, Cloud Run, GKE, etc.)
   - **SPIFFE/SPIRE** (service identity framework)
+  - **This project** (issues OIDC tokens for AWS workloads)
+
 
 **Relying Party (RP)** - Accepts and verifies tokens to authenticate identities
 - Retrieves public keys from the OP (typically via JWKS, but other mechanisms possible)
@@ -60,9 +61,9 @@ In OIDC-based workload identity, there are two key roles defined by the [OpenID 
   - **Google Cloud** (accepts external OIDC tokens via Workload Identity Federation)
   - **Kubernetes** (verifies service account tokens)
 
-Note: Some systems play both roles. For example, Google Cloud acts as both an OP (issuing tokens for its workloads) and an RP (accepting tokens from GitHub Actions, AWS, etc.).
+Some systems play both roles in different contexts. For example, Google Cloud acts as both an OP (issuing tokens for its workloads) and an RP (accepting tokens from GitHub Actions, AWS, etc.).
 
-**This project is an OpenID Provider** - it issues OIDC tokens that assert AWS identities. These tokens can then be used to authenticate with any Relying Party that accepts them.
+This project is an OpenID Provider: it issues OIDC tokens that assert AWS identities. These tokens can then be used to authenticate with any Relying Party that accepts them.
 
 #### Relevant Specifications
 
@@ -79,11 +80,7 @@ This project currently implements **RS256** signing, which is the default algori
 
 ### The Problem: AWS ↔ OIDC Gap
 
-AWS provides excellent support for **OIDC → AWS** authentication (via `AssumeRoleWithWebIdentity`), allowing external OIDC tokens to access AWS resources. In this scenario, **AWS acts as a Relying Party** - it accepts and verifies OIDC tokens from external OpenID Providers.
-
-However, **AWS does not provide the reverse**: AWS does not act as an OpenID Provider for its workloads. There's no built-in way for AWS workloads to obtain OIDC tokens that external services can verify.
-
-This creates a gap: Your AWS workloads (EC2, ECS, Lambda) have strong IAM-based identities, but they can't use them to authenticate with services that only accept OIDC tokens.
+AWS supports authenticating *to* AWS via OIDC (see `AssumeRoleWithWebIdentity`), allowing external OIDC tokens to access AWS resources. In this scenario, AWS acts as a Relying Party: it accepts and verifies OIDC tokens from external OpenID Providers. However, AWS does not provide the reverse: AWS does not act as an OpenID Provider for its workloads. There's no built-in way for AWS workloads to obtain OIDC tokens that external services can verify. This creates a gap: Your AWS workloads (EC2, ECS, Lambda) have strong IAM-based identities, but they can't use them to authenticate with services that only accept OIDC tokens, like Tailscale Workload Identity.
 
 ### This Project: Bridging the Gap
 
@@ -250,7 +247,7 @@ docker run -e AWS_ACCESS_KEY_ID -e AWS_SECRET_ACCESS_KEY \
   node client.js https://your-token-url/ tailscale
 ```
 
-**Required IAM Permission:**
+Required IAM permission:
 
 ```json
 {
@@ -265,7 +262,7 @@ docker run -e AWS_ACCESS_KEY_ID -e AWS_SECRET_ACCESS_KEY \
 }
 ```
 
-**Response:**
+Response:
 
 ```json
 {
@@ -280,7 +277,7 @@ docker run -e AWS_ACCESS_KEY_ID -e AWS_SECRET_ACCESS_KEY \
 The generated JWT includes:
 
 **Standard OIDC Claims:**
-- `iss`: Issuer (your configured ISSUER)
+- `iss`: Issuer (your configured `ISSUER`)
 - `sub`: Subject (AWS ARN)
 - `aud`: Audience (from request or defaults to issuer)
 - `iat`: Issued at timestamp
