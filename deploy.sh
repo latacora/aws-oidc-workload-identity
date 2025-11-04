@@ -154,7 +154,7 @@ cp ../token-exchange.js token-exchange/index.js
 
 cd token-exchange
 npm init -y > /dev/null 2>&1
-npm install @aws-sdk/client-sts @aws-sdk/client-kms --omit=dev > /dev/null 2>&1
+npm install @aws-sdk/client-kms --omit=dev > /dev/null 2>&1
 zip -q -r ../token-exchange.zip .
 cd ..
 
@@ -167,6 +167,16 @@ cd jwks
 npm init -y > /dev/null 2>&1
 npm install @aws-sdk/client-kms --omit=dev > /dev/null 2>&1
 zip -q -r ../jwks.zip .
+cd ..
+
+# Package Discovery Lambda
+echo "Packaging discovery Lambda..."
+mkdir -p discovery
+cp ../discovery.js discovery/index.js
+
+cd discovery
+npm init -y > /dev/null 2>&1
+zip -q -r ../discovery.zip .
 cd ..
 
 cd ..
@@ -207,23 +217,16 @@ else
   # Wait for function to be active
   aws lambda wait function-active --function-name "$LAMBDA_TOKEN_NAME" --region "$REGION"
 
-  # Create function URL
+  # Create function URL with IAM auth
   # SC2034: Variable appears unused. We capture the output for potential debugging
   # but only need the side effect (creating the URL). The URL is retrieved separately.
   # shellcheck disable=SC2034
   TOKEN_URL_CONFIG=$(aws lambda create-function-url-config \
     --function-name "$LAMBDA_TOKEN_NAME" \
-    --auth-type NONE \
+    --auth-type AWS_IAM \
     --region "$REGION")
 
-  # Add permission for function URL
-  aws lambda add-permission \
-    --function-name "$LAMBDA_TOKEN_NAME" \
-    --statement-id FunctionURLAllowPublicAccess \
-    --action lambda:InvokeFunctionUrl \
-    --principal "*" \
-    --function-url-auth-type NONE \
-    --region "$REGION" > /dev/null 2>&1 || true
+  echo "Token exchange requires AWS_IAM auth (SigV4 signing)"
 fi
 
 # Get function URL
@@ -293,6 +296,65 @@ JWKS_URL=$(aws lambda get-function-url-config \
   --output text)
 
 echo "JWKS URL: $JWKS_URL"
+
+# Discovery Lambda
+LAMBDA_DISCOVERY_NAME="${STACK_NAME}-discovery"
+echo "Deploying discovery Lambda..."
+
+if aws lambda get-function --function-name "$LAMBDA_DISCOVERY_NAME" --region "$REGION" 2>/dev/null; then
+  echo "Updating existing function..."
+  aws lambda update-function-code \
+    --function-name "$LAMBDA_DISCOVERY_NAME" \
+    --zip-file fileb://.deploy/discovery.zip \
+    --region "$REGION" > /dev/null
+
+  aws lambda update-function-configuration \
+    --function-name "$LAMBDA_DISCOVERY_NAME" \
+    --environment "Variables={ISSUER=$ISSUER,JWKS_URL=$JWKS_URL}" \
+    --region "$REGION" > /dev/null
+else
+  echo "Creating new function..."
+  aws lambda create-function \
+    --function-name "$LAMBDA_DISCOVERY_NAME" \
+    --runtime nodejs20.x \
+    --handler index.handler \
+    --role "$ROLE_ARN" \
+    --zip-file fileb://.deploy/discovery.zip \
+    --environment "Variables={ISSUER=$ISSUER,JWKS_URL=$JWKS_URL}" \
+    --timeout 10 \
+    --memory-size 128 \
+    --region "$REGION" > /dev/null
+
+  # Wait for function to be active
+  aws lambda wait function-active --function-name "$LAMBDA_DISCOVERY_NAME" --region "$REGION"
+
+  # Create function URL (public, no auth needed for discovery)
+  # SC2034: Variable appears unused. We capture the output for potential debugging
+  # but only need the side effect (creating the URL). The URL is retrieved separately.
+  # shellcheck disable=SC2034
+  DISCOVERY_URL_CONFIG=$(aws lambda create-function-url-config \
+    --function-name "$LAMBDA_DISCOVERY_NAME" \
+    --auth-type NONE \
+    --region "$REGION")
+
+  # Add permission for function URL
+  aws lambda add-permission \
+    --function-name "$LAMBDA_DISCOVERY_NAME" \
+    --statement-id FunctionURLAllowPublicAccess \
+    --action lambda:InvokeFunctionUrl \
+    --principal "*" \
+    --function-url-auth-type NONE \
+    --region "$REGION" > /dev/null 2>&1 || true
+fi
+
+# Get function URL
+DISCOVERY_URL=$(aws lambda get-function-url-config \
+  --function-name "$LAMBDA_DISCOVERY_NAME" \
+  --region "$REGION" \
+  --query FunctionUrl \
+  --output text)
+
+echo "Discovery URL: $DISCOVERY_URL"
 echo ""
 
 # Save deployment info
@@ -305,6 +367,7 @@ cat > deployment-output.json <<EOF
   "issuer": "$ISSUER",
   "token_url": "$TOKEN_URL",
   "jwks_url": "$JWKS_URL",
+  "discovery_url": "$DISCOVERY_URL",
   "lambda_role_arn": "$ROLE_ARN"
 }
 EOF
@@ -313,11 +376,15 @@ echo -e "${GREEN}=== Deployment Complete ===${NC}"
 echo ""
 echo "Configuration:"
 echo "  Issuer: $ISSUER"
-echo "  Token Endpoint: $TOKEN_URL"
-echo "  JWKS Endpoint: $JWKS_URL"
+echo "  Token Endpoint: $TOKEN_URL (requires AWS_IAM auth)"
+echo "  JWKS Endpoint: $JWKS_URL (public)"
+echo "  Discovery Endpoint: $DISCOVERY_URL (public)"
+echo ""
+echo "To get a token:"
+echo "  node client.js $TOKEN_URL [audience]"
+echo ""
+echo "Or install and use:"
+echo "  npm install"
+echo "  npm run get-token $TOKEN_URL tailscale"
 echo ""
 echo "Deployment details saved to: deployment-output.json"
-echo ""
-echo -e "${YELLOW}Important: Update your ISSUER to match one of these URLs if needed:${NC}"
-echo "  export ISSUER=${TOKEN_URL%/}"
-echo "  ./deploy.sh"

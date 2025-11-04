@@ -28,8 +28,9 @@ echo -e "${YELLOW}Step 1: Deleting Lambda functions...${NC}"
 
 LAMBDA_TOKEN_NAME="${STACK_NAME}-token-exchange"
 LAMBDA_JWKS_NAME="${STACK_NAME}-jwks"
+LAMBDA_DISCOVERY_NAME="${STACK_NAME}-discovery"
 
-for LAMBDA_NAME in "$LAMBDA_TOKEN_NAME" "$LAMBDA_JWKS_NAME"; do
+for LAMBDA_NAME in "$LAMBDA_TOKEN_NAME" "$LAMBDA_JWKS_NAME" "$LAMBDA_DISCOVERY_NAME"; do
   echo "Deleting $LAMBDA_NAME..."
 
   # Delete function URL config if exists
