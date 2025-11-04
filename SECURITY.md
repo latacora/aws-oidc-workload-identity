@@ -38,7 +38,58 @@ graph LR
 
 ### Threats We Mitigate
 
-#### 1. Token Forgery
+#### 1. Direct Lambda Invocation (Credential Forgery)
+**Threat**: Attacker with `lambda:InvokeFunction` permission directly invokes the Lambda function and forges IAM identity
+
+**Attack Scenario**:
+```bash
+# Attacker forges IAM context to impersonate Administrator role
+aws lambda invoke \
+  --function-name aws-oidc-workload-identity-token-exchange \
+  --payload '{
+    "requestContext": {
+      "authorizer": {
+        "iam": {
+          "userArn": "arn:aws:iam::123456789012:role/Administrator",
+          "accountId": "123456789012",
+          "userId": "AIDAI123456"
+        }
+      }
+    }
+  }' \
+  response.json
+
+# Result: Lambda trusts forged data and mints OIDC token for Administrator
+```
+
+**Impact**: **CRITICAL** - Complete authentication bypass. Attacker can mint OIDC tokens for ANY AWS identity.
+
+**Mitigation**:
+- Resource-based policy restricts `lambda:InvokeFunction` with `lambda:InvokedViaFunctionUrl` condition
+- Lambda can ONLY be invoked via Function URL, never directly
+- AWS sets `lambda:InvokedViaFunctionUrl` context key during authorization (cannot be forged)
+- Deploy script automatically configures this protection
+
+**Verification**:
+```bash
+# Check resource-based policy includes the protection
+aws lambda get-policy \
+  --function-name aws-oidc-workload-identity-token-exchange | jq
+
+# Should see:
+# - Statement with Action: lambda:InvokeFunctionUrl
+# - Statement with Action: lambda:InvokeFunction AND Condition: lambda:InvokedViaFunctionUrl: true
+```
+
+**Why This Works**:
+- When invoked via Function URL: AWS validates SigV4 signature and populates `requestContext.authorizer.iam` with verified identity
+- When invoked directly: Attacker controls entire event JSON, including `requestContext` - but IAM policy blocks the invocation
+- The `lambda:InvokedViaFunctionUrl` condition is set by AWS during authorization, before the Lambda executes
+- Attackers cannot forge IAM condition keys - only the event payload
+
+**Critical Deployment Note**: Without this protection, anyone with `lambda:InvokeFunction` permission can mint arbitrary credentials. The deploy script MUST configure this resource-based policy.
+
+#### 2. Token Forgery
 **Threat**: Attacker creates fake tokens
 
 **Mitigation**:

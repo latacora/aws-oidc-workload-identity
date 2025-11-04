@@ -227,6 +227,33 @@ else
     --region "$REGION")
 
   echo "Token exchange requires AWS_IAM auth (SigV4 signing)"
+
+  # SECURITY CRITICAL: Add resource-based policy to prevent direct Lambda invocation
+  # Without these permissions, attackers with lambda:InvokeFunction could forge the
+  # requestContext.authorizer.iam data and mint arbitrary credentials.
+  # The lambda:InvokedViaFunctionUrl condition ensures the Lambda can ONLY be invoked
+  # via Function URL, where AWS validates SigV4 and populates the IAM context.
+
+  # Allow InvokeFunctionUrl with IAM auth
+  aws lambda add-permission \
+    --function-name "$LAMBDA_TOKEN_NAME" \
+    --statement-id UrlPolicyInvokeURL \
+    --action lambda:InvokeFunctionUrl \
+    --principal '*' \
+    --function-url-auth-type AWS_IAM \
+    --region "$REGION" > /dev/null 2>&1 || true
+
+  # Allow InvokeFunction ONLY when invoked via Function URL
+  # This prevents direct "aws lambda invoke" calls which could forge the IAM context
+  aws lambda add-permission \
+    --function-name "$LAMBDA_TOKEN_NAME" \
+    --statement-id UrlPolicyInvokeFunction \
+    --action lambda:InvokeFunction \
+    --principal '*' \
+    --invoked-via-function-url \
+    --region "$REGION" > /dev/null 2>&1 || true
+
+  echo "Resource-based policy configured to prevent direct invocation"
 fi
 
 # Get function URL

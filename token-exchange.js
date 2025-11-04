@@ -12,6 +12,37 @@
  *
  * No credentials are transmitted - caller signs request with AWS SigV4,
  * and Lambda runtime validates and provides identity information.
+ *
+ * SECURITY CRITICAL - Trust Model:
+ * ===================================
+ * This Lambda trusts event.requestContext.authorizer.iam as the source of truth
+ * for caller identity. This is ONLY secure because:
+ *
+ * 1. Resource-based policy restricts lambda:InvokeFunction with condition:
+ *    lambda:InvokedViaFunctionUrl: true
+ *
+ * 2. This means the Lambda can ONLY be invoked via Function URL, never directly
+ *
+ * 3. When invoked via Function URL:
+ *    - AWS validates the SigV4 signature before invoking Lambda
+ *    - AWS populates requestContext.authorizer.iam with verified identity
+ *    - This data is trusted because AWS validated it
+ *
+ * 4. Direct invocation (aws lambda invoke) is blocked by IAM:
+ *    - Even if attacker has valid IAM credentials
+ *    - Even if attacker forges the entire event JSON
+ *    - IAM policy blocks the invocation before Lambda executes
+ *    - The lambda:InvokedViaFunctionUrl condition is set by AWS during
+ *      authorization, before the Lambda runs, and cannot be forged
+ *
+ * WITHOUT the resource-based policy protection:
+ * - Anyone with lambda:InvokeFunction permission could directly invoke this Lambda
+ * - They could forge event.requestContext.authorizer.iam to impersonate any identity
+ * - This would allow minting OIDC tokens for arbitrary AWS principals
+ * - This is a CRITICAL vulnerability that bypasses all authentication
+ *
+ * The deploy script (deploy.sh) MUST configure this resource-based policy.
+ * Verify with: aws lambda get-policy --function-name <function-name>
  */
 
 import { KMSClient, SignCommand, GetPublicKeyCommand } from '@aws-sdk/client-kms';

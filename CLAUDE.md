@@ -161,6 +161,28 @@ curl $(cat deployment-output.json | jq -r '.jwks_url') | jq
 - Follow principle of least privilege
 - Keep dependencies minimal
 
+**Critical Security Requirement - Direct Invocation Protection**:
+
+The token-exchange Lambda MUST have a resource-based policy that prevents direct invocation. Without this:
+- Anyone with `lambda:InvokeFunction` permission can directly invoke the Lambda
+- They can forge the entire event JSON, including `requestContext.authorizer.iam`
+- This allows minting OIDC tokens for ANY AWS identity (complete auth bypass)
+
+The deploy script automatically configures this protection by:
+1. Allowing `lambda:InvokeFunctionUrl` for Function URL access
+2. Allowing `lambda:InvokeFunction` ONLY with condition `lambda:InvokedViaFunctionUrl: true`
+
+The `lambda:InvokedViaFunctionUrl` condition key:
+- Set by AWS during IAM authorization, before Lambda execution
+- Cannot be forged by attackers (unlike event payload data)
+- Ensures Lambda only runs when invoked via Function URL with validated SigV4
+
+Verification:
+```bash
+aws lambda get-policy --function-name aws-oidc-workload-identity-token-exchange | jq
+# Must show condition: "lambda:InvokedViaFunctionUrl": "true"
+```
+
 ### Documentation
 
 - Use Mermaid diagrams for all architecture and flow diagrams
@@ -213,9 +235,15 @@ curl $(cat deployment-output.json | jq -r '.jwks_url') | jq
    - Creates or updates Lambda functions
    - Sets environment variables
    - Creates Function URLs
-   - Adds invoke permissions
+   - **SECURITY CRITICAL**: Configures resource-based policy (see below)
 
-6. **Output**
+6. **Security Configuration** (CRITICAL)
+   - Adds resource-based policy to token-exchange Lambda
+   - Restricts `lambda:InvokeFunction` with `lambda:InvokedViaFunctionUrl: true` condition
+   - Prevents direct invocation that could forge IAM identity
+   - Without this: Anyone with `lambda:InvokeFunction` can mint arbitrary credentials
+
+7. **Output**
    - Prints endpoint URLs
    - Saves configuration to `deployment-output.json`
 
