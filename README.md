@@ -156,7 +156,7 @@ export STACK_NAME="aws-oidc-workload-identity"
 export AWS_REGION="us-east-1"
 
 # Deploy
-./deploy.sh
+npm run deploy
 ```
 
 The deployment script will:
@@ -311,13 +311,13 @@ Test the complete deployment on AWS:
 
 ```bash
 # Run integration test (deploys, tests, and cleans up)
-./test-integration.sh
+npm run test:integration
 
 # Keep deployment after test (for manual inspection)
-CLEANUP=false ./test-integration.sh
+CLEANUP=false npm run test:integration
 
 # Use custom stack name and region
-STACK_NAME=my-test-stack AWS_REGION=us-west-2 ./test-integration.sh
+STACK_NAME=my-test-stack AWS_REGION=us-west-2 npm run test:integration
 ```
 
 The integration test:
@@ -397,7 +397,7 @@ Estimated monthly cost for moderate usage (10k tokens/month): **~$1-2**
 ## Cleanup
 
 ```bash
-./destroy.sh
+npm run destroy
 ```
 
 This will:

@@ -11,7 +11,7 @@
     "test": "node --test test/*.test.js",
     "test:watch": "node --test --watch test/*.test.js",
     "test:unit": "node --test test/token-exchange.test.js test/jwks.test.js test/discovery.test.js",
-    "test:integration": "node --test test/integration.test.js",
+    "test:integration": "./test-integration.sh",
     "deploy": "./deploy.sh",
     "destroy": "./destroy.sh",
     "get-token": "node client.js"
