@@ -205,7 +205,7 @@ else
   echo "Creating new function..."
   aws lambda create-function \
     --function-name "$LAMBDA_TOKEN_NAME" \
-    --runtime nodejs20.x \
+    --runtime nodejs22.x \
     --handler index.handler \
     --role "$ROLE_ARN" \
     --zip-file fileb://.deploy/token-exchange.zip \
@@ -284,7 +284,7 @@ else
   echo "Creating new function..."
   aws lambda create-function \
     --function-name "$LAMBDA_JWKS_NAME" \
-    --runtime nodejs20.x \
+    --runtime nodejs22.x \
     --handler index.handler \
     --role "$ROLE_ARN" \
     --zip-file fileb://.deploy/jwks.zip \
@@ -343,7 +343,7 @@ else
   echo "Creating new function..."
   aws lambda create-function \
     --function-name "$LAMBDA_DISCOVERY_NAME" \
-    --runtime nodejs20.x \
+    --runtime nodejs22.x \
     --handler index.handler \
     --role "$ROLE_ARN" \
     --zip-file fileb://.deploy/discovery.zip \

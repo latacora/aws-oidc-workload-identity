@@ -27,7 +27,7 @@ aws-oidc-workload-identity/
 
 ### Prerequisites
 
-- Node.js 20+
+- Node.js 22+
 - AWS CLI configured
 - Git
 - Bash shell

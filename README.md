@@ -188,7 +188,7 @@ sequenceDiagram
 
 - AWS CLI configured with appropriate credentials
 - Bash shell
-- Node.js 20+ (for local testing)
+- Node.js 22+ (for local testing)
 - Permissions to create: KMS keys, Lambda functions, IAM roles
 
 ### Quick Start
