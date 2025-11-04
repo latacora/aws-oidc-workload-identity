@@ -451,6 +451,4 @@ MIT
 
 ## Acknowledgments
 
-- Inspired by [Tailscale Workload Identity](https://tailscale.com/blog/workload-identity-beta)
-- Uses the S3 pre-signed URL technique for AWS identity verification
-- Built with minimal dependencies for security and maintainability
+Inspired by the launch of [Tailscale Workload Identity](https://tailscale.com/blog/workload-identity-beta) and wanting to use it on AWS.
