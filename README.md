@@ -45,28 +45,30 @@ graph TB
 ```mermaid
 sequenceDiagram
     participant Client as AWS Workload
-    participant TokenLambda as Token Exchange Lambda
-    participant STS as AWS STS
+    participant TokenLambda as Token Exchange Lambda<br/>(IAM Auth)
     participant KMS as AWS KMS
     participant Consumer as OIDC Consumer<br/>(e.g. Tailscale)
+    participant Discovery as Discovery Endpoint
     participant JWKSLambda as JWKS Lambda
 
-    Note over Client,Consumer: Token Generation
-    Client->>TokenLambda: POST /token<br/>{access_key, secret_key, session_token}
-    TokenLambda->>STS: GetCallerIdentity(credentials)
-    STS-->>TokenLambda: {Account, ARN, UserId}
-    TokenLambda->>TokenLambda: Build JWT claims
+    Note over Client,TokenLambda: Token Generation (SigV4)
+    Client->>Client: Sign request with SigV4<br/>(using AWS credentials)
+    Client->>TokenLambda: POST /token?audience=tailscale<br/>(signed request, empty body)
+    TokenLambda->>TokenLambda: Lambda validates SigV4<br/>Extracts identity from<br/>requestContext.authorizer.iam
+    TokenLambda->>TokenLambda: Build JWT claims from<br/>IAM context
     TokenLambda->>KMS: Sign(JWT header + payload)
     KMS-->>TokenLambda: Signature
     TokenLambda-->>Client: OIDC Token (JWT)
 
-    Note over Client,Consumer: Token Verification
+    Note over Consumer,JWKSLambda: Token Verification (Consumer Side)
+    Consumer->>Discovery: GET /.well-known/openid-configuration
+    Discovery-->>Consumer: {issuer, jwks_uri, ...}
     Client->>Consumer: Authenticate with token
-    Consumer->>JWKSLambda: GET /.well-known/jwks.json
+    Consumer->>JWKSLambda: GET jwks_uri
     JWKSLambda->>KMS: GetPublicKey()
     KMS-->>JWKSLambda: Public key (DER)
     JWKSLambda-->>Consumer: JWKS (JSON)
-    Consumer->>Consumer: Verify token signature<br/>Validate claims
+    Consumer->>Consumer: Verify signature<br/>Validate claims & expiry
     Consumer-->>Client: Access granted
 ```
 
@@ -77,26 +79,34 @@ sequenceDiagram
    - Private key never leaves KMS
    - Public key exposed via JWKS endpoint
 
-2. **Token Exchange Lambda** (`/token` endpoint)
-   - Accepts AWS credentials (access key, secret key, optional session token)
-   - Verifies credentials via STS `GetCallerIdentity`
-   - Generates JWT with standard OIDC claims
+2. **Token Exchange Lambda** (`/token` endpoint, AWS_IAM auth required)
+   - Accepts SigV4-signed requests (no credentials in body)
+   - Lambda runtime validates SigV4 signature automatically
+   - Extracts identity from `requestContext.authorizer.iam`
+   - Generates JWT with standard OIDC claims + AWS-specific claims
    - Signs JWT using KMS
    - Returns OIDC-compliant token
 
-3. **JWKS Lambda** (`/.well-known/jwks.json` endpoint)
+3. **JWKS Lambda** (`/jwks.json` endpoint, public)
    - Exposes KMS public key in JWKS format
    - Used by OIDC consumers to verify tokens
    - Cached for performance
 
+4. **Discovery Lambda** (`/.well-known/openid-configuration` endpoint, public)
+   - OIDC Discovery document for auto-configuration
+   - Allows consumers like Tailscale to discover JWKS URL
+   - Lists supported algorithms and claims
+
 ## Security Properties
 
 - **Cryptographic Security**: Uses AWS KMS with RSA-2048, preventing private key exposure
-- **Identity Verification**: All AWS credentials are verified via STS before token issuance
+- **Identity Verification**: AWS SigV4 authentication verified by Lambda runtime before token issuance
+- **No Credential Transmission**: Credentials never sent over network - only SigV4 signatures
 - **Short-lived Tokens**: Default 1-hour lifetime (configurable)
 - **Immutable Audit Trail**: All operations logged to CloudWatch
 - **No Stored Secrets**: Everything derives from AWS IAM and KMS
 - **Tamper-proof**: JWT signatures cryptographically prevent token modification
+- **AWS Native**: Uses standard AWS authentication - works with all AWS credential sources
 
 ## Deployment
 
@@ -145,19 +155,44 @@ JWKS Endpoint: https://xyz789.lambda-url.us-east-1.on.aws/
 
 ### Requesting a Token
 
+The token endpoint requires AWS SigV4 authentication. No credentials are sent in the request body.
+
+**Using the provided client:**
+
 ```bash
-# Using AWS credentials
-curl -X POST https://your-token-url/ \
-  -H "Content-Type: application/json" \
-  -d '{
-    "access_key_id": "AKIAIOSFODNN7EXAMPLE",
-    "secret_access_key": "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
-    "session_token": "optional-session-token",
-    "audience": "optional-audience"
-  }'
+# Install dependencies
+npm install
+
+# Get a token (uses AWS credentials from environment or IAM role)
+node client.js https://your-token-url/ tailscale
 ```
 
-Response:
+**Using Docker:**
+
+```bash
+docker run -e AWS_ACCESS_KEY_ID -e AWS_SECRET_ACCESS_KEY \
+  -e AWS_REGION=us-east-1 \
+  aws-oidc-token \
+  node client.js https://your-token-url/ tailscale
+```
+
+**Required IAM Permission:**
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": "lambda:InvokeFunctionUrl",
+      "Resource": "arn:aws:lambda:REGION:ACCOUNT:function:STACK-token-exchange"
+    }
+  ]
+}
+```
+
+**Response:**
+
 ```json
 {
   "access_token": "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6I...",
@@ -183,6 +218,8 @@ The generated JWT includes:
 - `aws:userid`: AWS User ID
 - `aws:resource_type`: Type (role, user, assumed-role)
 - `aws:resource_name`: Resource name
+- `aws:access_key`: AWS access key ID used for authentication
+- `aws:principal_org`: AWS Organization ID (if applicable)
 
 ### Verifying Tokens
 
@@ -210,7 +247,7 @@ Response:
 
 ## Integration with Tailscale
 
-See [TAILSCALE.md](./TAILSCALE.md) for detailed instructions on integrating with Tailscale Workload Identity.
+See [docs/tailscale.md](./docs/tailscale.md) for detailed instructions on integrating with Tailscale Workload Identity.
 
 Quick summary:
 1. Deploy this solution
@@ -220,23 +257,51 @@ Quick summary:
 
 ## Testing
 
+### Unit Tests
+
 ```bash
 # Install dependencies
 npm install
 
-# Run tests
+# Run unit tests
 npm test
 
-# Run tests in watch mode
+# Run unit tests in watch mode
 npm run test:watch
 ```
 
-The test suite includes:
-- Unit tests for token generation
-- Unit tests for JWKS endpoint
-- Integration tests for end-to-end flow
+The unit test suite includes:
+- Token generation with SigV4 authentication
+- JWKS endpoint functionality
+- Discovery endpoint functionality
 - Security tests for token tampering
 - OIDC compliance tests
+
+### Integration Tests
+
+Test the complete deployment on AWS:
+
+```bash
+# Run integration test (deploys, tests, and cleans up)
+./test-integration.sh
+
+# Keep deployment after test (for manual inspection)
+CLEANUP=false ./test-integration.sh
+
+# Use custom stack name and region
+STACK_NAME=my-test-stack AWS_REGION=us-west-2 ./test-integration.sh
+```
+
+The integration test:
+1. Deploys all infrastructure to AWS
+2. Tests JWKS endpoint (public access)
+3. Tests Discovery endpoint (public access)
+4. Tests token exchange with SigV4 authentication
+5. Verifies token claims match AWS identity
+6. Tests error cases (unauthenticated requests)
+7. Cleans up all resources
+
+**Note**: Integration tests require valid AWS credentials with permissions to create Lambda functions, KMS keys, and IAM roles.
 
 ## Configuration
 
@@ -251,6 +316,11 @@ Environment variables for Lambda functions:
 ### JWKS Lambda
 
 - `KMS_KEY_ID`: KMS key ID or ARN (set by deployment)
+
+### Discovery Lambda
+
+- `ISSUER`: Token issuer URL (set by deployment)
+- `JWKS_URL`: JWKS endpoint URL (set by deployment)
 
 ## Cost Considerations
 
@@ -269,7 +339,7 @@ Estimated monthly cost for moderate usage (10k tokens/month): **~$1-2**
 **Protected Against:**
 - Private key exposure (KMS stores keys in HSMs)
 - Token tampering (cryptographic signatures)
-- Invalid credential use (STS verification)
+- Invalid credential use (SigV4 authentication verified by Lambda)
 - Replay attacks (short token lifetime + unique `iat`)
 
 **Not Protected Against:**
@@ -319,6 +389,9 @@ aws kms cancel-key-deletion --key-id YOUR_KEY_ID --region us-east-1
 ### Token Exchange Fails with 401
 
 - Verify AWS credentials are valid: `aws sts get-caller-identity`
+- Ensure the IAM principal has `lambda:InvokeFunctionUrl` permission
+- Check that request is properly signed with SigV4 (client.js handles this automatically)
+- Verify the AWS region matches the Lambda function region
 - Check CloudWatch logs for the token exchange Lambda
 
 ### Token Verification Fails
