@@ -83,7 +83,7 @@ Major redesign in progress to use AWS SigV4 authentication instead of passing ra
   - IAM policy requirements
   - Client usage examples
 
-- [ ] **TAILSCALE.md**: Update for new flow
+- [x] **docs/tailscale.md**: Update for new flow
   - New architecture diagram
   - SigV4 authentication steps
   - Docker sidecar examples
@@ -95,7 +95,7 @@ Major redesign in progress to use AWS SigV4 authentication instead of passing ra
   - Update threat model
   - IAM policy best practices
 
-- [ ] **CLIENT.md**: New client documentation
+- [x] **docs/client.md**: New client documentation
   - Installation instructions
   - Usage examples
   - Environment variables
@@ -172,12 +172,12 @@ Compared to old implementation:
 
 ## Next Steps (Priority Order)
 
-1. **Update deploy.sh** (blocking for deployment)
-2. **Write integration test** (validates everything works)
-3. **Create Docker image** (enables sidecar pattern)
-4. **Update README** (most critical documentation)
-5. **Update TAILSCALE.md** (primary use case)
-6. **Create CLIENT.md** (client-side documentation)
+1. ~~**Update deploy.sh**~~ ✅ (blocking for deployment)
+2. ~~**Write integration test**~~ ✅ (validates everything works)
+3. ~~**Create Docker image**~~ ✅ (enables sidecar pattern)
+4. ~~**Update README**~~ ✅ (most critical documentation)
+5. ~~**Update TAILSCALE.md**~~ ✅ (primary use case) → moved to docs/tailscale.md
+6. ~~**Create CLIENT.md**~~ ✅ (client-side documentation) → created at docs/client.md
 7. **Update other docs** (SECURITY.md, CLAUDE.md)
 8. **Fix existing tests** (optional, for completeness)
 
