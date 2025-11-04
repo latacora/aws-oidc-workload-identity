@@ -51,30 +51,11 @@ graph LR
 - Restrict which audiences can be requested
 - Make authorization decisions about service access
 
-**Authorization Flow:**
+**How Authorization Works:**
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│ This Service (Identity Bridge)                              │
-│                                                              │
-│ Input:  AWS IAM identity + audience claim                   │
-│ Output: Signed OIDC token with verified identity claims     │
-│                                                              │
-│ ✅ Verifies: "This is really AWS role X"                    │
-│ ❌ Does NOT verify: "Role X should access service Y"        │
-└─────────────────────────────────────────────────────────────┘
-                          │
-                          ▼
-┌─────────────────────────────────────────────────────────────┐
-│ OIDC Consumer / Relying Party (Authorization)               │
-│                                                              │
-│ - Verifies token signature (authenticity)                   │
-│ - Validates claims (issuer, audience, expiration)           │
-│ - Applies access policies based on identity claims          │
-│                                                              │
-│ ✅ Decides: "Role X with these claims can/cannot access"    │
-└─────────────────────────────────────────────────────────────┘
-```
+This service verifies "This is really AWS role X" but does NOT verify "Role X should access service Y". The service takes an AWS IAM identity and an audience claim as input, and produces a signed OIDC token with verified identity claims as output.
+
+The OIDC consumer (Relying Party) receives the token and makes the authorization decision. The consumer verifies the token signature (proving authenticity), validates claims (issuer, audience, expiration), applies its own access policies based on identity claims, and ultimately decides whether the presented identity should be granted access.
 
 **Example:**
 
