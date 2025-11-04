@@ -89,11 +89,13 @@ This project implements a minimal, secure **AWS → OIDC** token exchange servic
 - **AWS Lambda** with Function URLs for serverless endpoints
 - **AWS SigV4** authentication (no credentials transmitted)
 
-Your AWS workloads can now authenticate with any OIDC-compatible service, such as:
-- [Tailscale Workload Identity](https://tailscale.com/blog/workload-identity-beta) - zero-trust networking
-- [HashiCorp Vault](https://www.vaultproject.io/) - secrets management
-- [Kubernetes](https://kubernetes.io/docs/reference/access-authn-authz/authentication/#openid-connect-tokens) - container orchestration
-- Any service accepting OIDC tokens
+Your AWS workloads can now authenticate to any Relying Party that accepts OIDC tokens, such as:
+- **[Tailscale](https://tailscale.com/kb/1581/workload-identity-federation)** - Zero-trust networking
+- **[HashiCorp Vault](https://developer.hashicorp.com/vault/docs/auth/jwt)** - Secrets management (supports OIDC JWT auth for unified auth patterns)
+- **[Kubernetes](https://kubernetes.io/docs/reference/access-authn-authz/authentication/#openid-connect-tokens)** - OIDC token authentication for service accounts
+- **[AWS](https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles_providers_create_oidc.html)** - Cross-account or multi-cloud access via `AssumeRoleWithWebIdentity`
+- **[Google Cloud](https://cloud.google.com/iam/docs/workload-identity-federation)** - Access GCP resources from AWS via Workload Identity Federation
+- **Custom applications** - Any service using standard JWT verification libraries
 
 ## Architecture
 
