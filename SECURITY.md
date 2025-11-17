@@ -26,7 +26,7 @@ graph LR
 - Identity verification before token issuance
 - Cryptographic proof of token authenticity
 - Tamper-proof tokens (signature verification fails if modified)
-- Short-lived credentials (1 hour default)
+- Short-lived credentials (10 minutes default)
 - Audit trail via CloudWatch Logs
 
 **Not Guaranteed**:
@@ -174,7 +174,7 @@ aws lambda get-policy \
 **Risk**: Attacker can request valid tokens
 
 **Residual Risk**:
-- Short token lifetime limits exposure window
+- Short token lifetime (10 minutes default) limits exposure window
 - CloudWatch logging provides audit trail
 - IAM policies can restrict which credentials can get tokens
 
@@ -224,9 +224,147 @@ aws lambda get-policy \
 - Same token can be used multiple times
 
 **Recommendations**:
-- Use short token lifetime (1 hour default)
+- Use short token lifetime (10 minutes default)
 - OIDC consumer should implement additional checks
 - Consider adding nonce for high-security use cases
+
+## Token Lifetime Security
+
+### What Token Lifetime Protects Against
+
+The token lifetime (default: 10 minutes) limits the window of opportunity for several attack scenarios:
+
+#### 1. Token Theft/Interception
+**Threat**: Attacker intercepts or steals an OIDC token
+
+**How Short Lifetime Helps**:
+- Token becomes invalid after expiration (10 minutes)
+- Attacker must use stolen token within a narrow window
+- Reduces time available for exploitation
+- Limits damage if token is logged, leaked, or exposed
+
+**Example**: If a token is accidentally committed to a Git repository or logged to a file, it expires quickly, limiting the exposure window.
+
+#### 2. Credential Compromise Window
+**Threat**: AWS credentials are compromised
+
+**How Short Lifetime Helps**:
+- Attacker can only mint tokens while AWS credentials remain valid
+- Shorter token lifetime = less time between AWS credential rotation and token expiration
+- Reduces the persistence of attacker access after credential revocation
+- Forces more frequent token minting (more audit trail entries)
+
+**Example**: If an attacker steals AWS credentials at 10:00 AM and you revoke them at 10:30 AM, tokens minted at 10:29 AM expire at 10:39 AM (10 minutes later), not 11:29 AM (1 hour later).
+
+#### 3. Delayed Token Revocation Response
+**Threat**: Tokens cannot be directly revoked before expiration
+
+**How Short Lifetime Helps**:
+- Credential revocation becomes effective faster (max 10 minutes delay)
+- Reduces time between detecting compromise and actual access termination
+- Complements AWS credential rotation strategies
+- Aligns with incident response timelines
+
+**Example**: After detecting suspicious activity, revoking AWS credentials stops new tokens immediately, but existing tokens remain valid until expiration. With 10-minute tokens, access ends much sooner than with 1-hour tokens.
+
+#### 4. Session Persistence After Authentication
+**Threat**: Relying Party maintains long-lived sessions based on OIDC tokens
+
+**Partial Protection**:
+- Token expiration doesn't necessarily end Relying Party sessions
+- However, shorter tokens reduce the initial trust window
+- Some Relying Parties may re-validate tokens or tie session lifetime to token expiration
+- Limits exposure if Relying Party behavior changes
+
+**Note**: This depends heavily on Relying Party implementation - token lifetime may or may not affect session duration.
+
+### What Token Lifetime Does NOT Protect Against
+
+Token lifetime is **not a silver bullet**. It does NOT protect against:
+
+1. **Active Credential Theft**: If attacker has live access to AWS credentials, they can mint new tokens continuously
+2. **Initial Access**: Short lifetime doesn't prevent the first token from being issued to a compromised identity
+3. **Relying Party Compromise**: If the OIDC consumer is compromised, token lifetime is irrelevant
+4. **Token Reuse**: Same token can be used multiple times within its lifetime
+5. **Session Extensions**: Relying Parties may establish sessions that outlive the token
+
+### Token Lifetime Trade-offs
+
+#### Short Token Lifetimes (5-15 minutes)
+
+**Security Benefits**:
+- ✅ Minimal exposure window for stolen/leaked tokens
+- ✅ Fast effective credential revocation (max 5-15 min delay)
+- ✅ Reduced blast radius for token compromise
+- ✅ Aligns with zero-trust security principles
+- ✅ Better for high-sensitivity environments
+
+**Operational Costs**:
+- ❌ More frequent token exchange calls
+- ❌ More AWS API calls (KMS Sign, potentially STS)
+- ❌ Higher AWS costs (KMS signing operations)
+- ❌ More CloudWatch log entries
+- ❌ Potential for rate limiting issues at scale
+- ❌ Client applications must handle re-authentication more frequently
+
+**Recommendations**:
+- Use for high-security environments
+- Use when token theft risk is high (e.g., tokens traverse untrusted networks)
+- Use when fast credential revocation is critical
+- Default 10 minutes is reasonable for most cases
+
+#### Long Token Lifetimes (1-2 hours)
+
+**Operational Benefits**:
+- ✅ Fewer token exchange calls
+- ✅ Lower AWS API costs
+- ✅ Reduced operational overhead
+- ✅ Less strain on KMS rate limits
+- ✅ Simpler client implementations
+- ✅ Better for batch/scheduled workloads
+
+**Security Risks**:
+- ❌ Longer exposure window if token is stolen (up to 1-2 hours)
+- ❌ Slower effective credential revocation
+- ❌ Greater blast radius for token leaks
+- ❌ Misaligned with zero-trust principles
+- ❌ Harder to audit and track token usage
+
+**Recommendations**:
+- Consider for low-sensitivity workloads
+- Use in trusted network environments
+- Use when cost optimization is priority over security
+- Implement additional compensating controls (network segmentation, monitoring)
+
+#### Choosing the Right Balance
+
+| Use Case | Recommended Lifetime | Rationale |
+|----------|---------------------|-----------|
+| Production workloads (general) | 10 minutes (default) | Balances security and practicality |
+| High-security environments | 5 minutes | Minimal exposure, fast revocation |
+| Development/testing | 30-60 minutes | Reduces friction during testing |
+| Batch/scheduled jobs | 15-30 minutes | Covers typical job duration |
+| Interactive sessions | 10 minutes | Acceptable re-auth frequency |
+| Cost-sensitive deployments | 30-60 minutes | Reduces KMS API calls |
+
+### Re-authentication Pattern
+
+When tokens expire, there is **no refresh token mechanism**. Simply repeat the token exchange request:
+
+```bash
+# Token expires after 10 minutes
+# Just call the endpoint again with your AWS credentials
+curl -X POST https://your-token-url/?audience=tailscale \
+  --aws-sigv4 "aws:amz:us-east-1:lambda"
+```
+
+**This is by design**:
+- Simpler implementation (no refresh token storage/rotation)
+- Same security model (AWS credentials remain the source of truth)
+- No additional state to manage
+- Easier to reason about security properties
+
+Client applications should implement automatic re-authentication before token expiration (e.g., refresh when 80% of lifetime has elapsed).
 
 ## Security Best Practices
 
@@ -414,7 +552,7 @@ npm update
 **Impact**: If credentials are compromised, attacker can use tokens until expiry
 
 **Workarounds**:
-- Use short token lifetime (1 hour)
+- Use short token lifetime (10 minutes default)
 - Rotate AWS credentials immediately if compromised
 - Monitor for suspicious token usage
 - OIDC consumer may implement additional checks
@@ -464,8 +602,8 @@ npm update
    - Rotate all credentials
    - Review CloudWatch logs for token requests
 
-2. **Within 1 hour**:
-   - Wait for tokens to expire (default 1 hour)
+2. **Within 10 minutes** (token lifetime):
+   - Wait for tokens to expire (default 10 minutes)
    - Review OIDC consumer access logs
    - Identify what resources were accessed
 
@@ -483,7 +621,7 @@ npm update
    - Update Lambda functions to use new key
    - DO NOT delete old key yet
 
-2. **Within 1 hour**:
+2. **Within 10 minutes** (token lifetime):
    - Wait for tokens signed with old key to expire
    - Verify OIDC consumers recognize new JWKS
 

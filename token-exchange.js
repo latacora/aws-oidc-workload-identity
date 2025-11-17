@@ -50,7 +50,7 @@ import crypto from 'crypto';
 
 const KMS_KEY_ID = process.env.KMS_KEY_ID;
 const ISSUER = process.env.ISSUER; // e.g., https://your-domain.com
-const TOKEN_LIFETIME_SECONDS = parseInt(process.env.TOKEN_LIFETIME_SECONDS || '3600', 10);
+const TOKEN_LIFETIME_SECONDS = parseInt(process.env.TOKEN_LIFETIME_SECONDS || '600', 10);
 
 const kmsClient = new KMSClient({});
 

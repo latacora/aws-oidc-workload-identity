@@ -26,7 +26,7 @@ Traditional authentication with static API keys or passwords has significant dra
 - **Difficult to revoke** without breaking other systems
 
 Workload identity solves these problems:
-- ✅ **Short-lived tokens** (typically 1 hour) that automatically expire
+- ✅ **Short-lived tokens** (typically minutes to hours) that automatically expire
 - ✅ **Cryptographic verification** prevents token forgery
 - ✅ **Fine-grained access control** based on verified identity claims
 - ✅ **Automatic rotation** - no manual credential management
@@ -175,7 +175,7 @@ sequenceDiagram
 - **Cryptographic Security**: Uses AWS KMS with RSA-2048, preventing private key exposure
 - **Identity Verification**: AWS SigV4 authentication verified by Lambda runtime before token issuance
 - **No Credential Transmission**: Credentials never sent over network - only SigV4 signatures
-- **Short-lived Tokens**: Default 1-hour lifetime (configurable)
+- **Short-lived Tokens**: Default 10-minute lifetime (configurable)
 - **Immutable Audit Trail**: All operations logged to CloudWatch
 - **No Stored Secrets**: Everything derives from AWS IAM and KMS
 - **Tamper-proof**: JWT signatures cryptographically prevent token modification
@@ -384,7 +384,7 @@ Environment variables for Lambda functions:
 
 - `KMS_KEY_ID`: KMS key ID or ARN (set by deployment)
 - `ISSUER`: Token issuer URL (set by deployment)
-- `TOKEN_LIFETIME_SECONDS`: Token lifetime in seconds (default: 3600)
+- `TOKEN_LIFETIME_SECONDS`: Token lifetime in seconds (default: 600)
 
 ### JWKS Lambda
 
@@ -394,6 +394,77 @@ Environment variables for Lambda functions:
 
 - `ISSUER`: Token issuer URL (set by deployment)
 - `JWKS_URL`: JWKS endpoint URL (set by deployment)
+
+## Token Lifetime
+
+### What Token Lifetime Controls
+
+The `TOKEN_LIFETIME_SECONDS` setting (default: 600 seconds / 10 minutes) controls the **JWT token validity period**, NOT necessarily how long your session lasts in the consuming service.
+
+**Important Distinction:**
+
+- **JWT Expiration**: The `exp` claim in the token defines when the JWT itself expires and will fail signature verification
+- **Session Duration**: How long the Relying Party (e.g., Tailscale, Vault) maintains your authenticated session
+
+These are **separate concerns**:
+
+1. **Token as Proof**: The OIDC token is cryptographic proof of your AWS identity at the time it was issued
+2. **Session Establishment**: The Relying Party uses this proof to establish or extend a session
+3. **Session Lifetime**: The Relying Party decides how long that session lasts based on their own policies
+
+**Example**: A 10-minute token used to authenticate with Tailscale might establish a session that lasts hours or days, depending on Tailscale's session policies. The token expiration only means you can't use that specific token anymore - it doesn't force your Tailscale session to end.
+
+### When Tokens Expire
+
+When a token expires:
+
+1. **No Refresh Tokens**: This implementation does not support refresh tokens
+2. **Simple Re-authentication**: Just call the token exchange endpoint again with your AWS credentials
+3. **New Token Issued**: You'll receive a fresh token with a new expiration time
+4. **Same Process**: The re-authentication process is identical to the initial authentication
+
+**There is no special refresh flow** - simply repeat the same token exchange request.
+
+### Configuring Token Lifetime
+
+You can override the default 10-minute lifetime by setting the environment variable during deployment:
+
+```bash
+# Example: 1-hour tokens
+export TOKEN_LIFETIME_SECONDS=3600
+./deploy.sh
+
+# Example: 5-minute tokens
+export TOKEN_LIFETIME_SECONDS=300
+./deploy.sh
+```
+
+Or update an existing deployment:
+
+```bash
+aws lambda update-function-configuration \
+  --function-name aws-oidc-workload-identity-token-exchange \
+  --environment "Variables={KMS_KEY_ID=your-key-id,ISSUER=https://your-issuer/,TOKEN_LIFETIME_SECONDS=1800}"
+```
+
+### Choosing a Token Lifetime
+
+**Shorter lifetimes (5-15 minutes)**:
+- ✅ Reduced exposure if token is stolen or leaked
+- ✅ Smaller window for token interception attacks
+- ✅ Faster credential revocation (stolen AWS creds can't mint tokens as long)
+- ❌ More frequent re-authentication calls
+- ❌ More AWS API calls (KMS, STS)
+- ❌ Slightly higher AWS costs
+
+**Longer lifetimes (1-2 hours)**:
+- ✅ Fewer re-authentication calls
+- ✅ Lower AWS API costs
+- ✅ Reduced operational overhead
+- ❌ Longer exposure window if token is stolen
+- ❌ Delayed response to credential compromise
+
+**Recommendation**: The default 10 minutes balances security and practicality for most workload identity use cases.
 
 ## Cost Considerations
 
@@ -457,7 +528,7 @@ This matches how other identity providers work (Google Cloud, GitHub Actions) - 
 
 ### Best Practices
 
-1. **Use Short-Lived Tokens**: Default 1 hour is recommended
+1. **Use Short-Lived Tokens**: Default 10 minutes balances security and practicality
 2. **Restrict IAM Permissions**: Only allow necessary principals to invoke Lambda
 3. **Enable CloudWatch Alarms**: Monitor for unusual token issuance patterns
 4. **Rotate KMS Keys**: Periodically rotate KMS keys (requires redeployment)
@@ -470,9 +541,8 @@ This matches how other identity providers work (Google Cloud, GitHub Actions) - 
 1. **Not a Hosted Service**: You must operate and monitor this infrastructure
 2. **Lambda Cold Starts**: First request after idle period may be slower (~1-2s)
 3. **No Token Revocation**: Tokens are valid until expiration (no revocation list)
-4. **No Refresh Tokens**: Tokens must be reissued after expiration
+4. **No Refresh Tokens**: Tokens must be reissued after expiration (simple re-authentication with same API call)
 5. **Limited Rate Limiting**: Lambda Function URLs have basic throttling but no sophisticated rate limiting
-6. **Token Lifetime Semantics Unclear**: The relationship between OIDC token lifetime and resulting credential lifetime in Relying Party systems is not well-defined (see issue #1)
 
 ## Cleanup
 

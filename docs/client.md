@@ -352,17 +352,276 @@ aws sts get-caller-identity  # Verify credentials work
 - Ensure DNS resolution works
 - Check VPC/firewall settings if running in private network
 
-### Token Expiry
+### Token Expiration Handling
 
-Tokens expire after 1 hour by default. Implement refresh logic:
+Tokens expire after 10 minutes by default (configurable via `TOKEN_LIFETIME_SECONDS`). Unlike many OIDC systems, **there are no refresh tokens** - you simply call the token exchange endpoint again with your AWS credentials to get a new token.
+
+#### Understanding Token Expiration
+
+**What happens when a token expires:**
+1. The JWT's `exp` claim passes the current time
+2. Signature verification at the Relying Party will still succeed
+3. However, the Relying Party should reject expired tokens
+4. To continue accessing the service, request a new token
+
+**Important**: Token expiration affects the **JWT validity**, not necessarily your session at the Relying Party. Some services may maintain sessions that outlive individual tokens.
+
+#### Recommended Re-authentication Pattern
+
+**Best Practice**: Refresh tokens proactively before they expire (around 80% of lifetime):
 
 ```bash
 #!/bin/bash
-# Refresh token every 50 minutes
+# Token lifetime: 10 minutes (600 seconds)
+# Refresh after 8 minutes (480 seconds) = 80% of lifetime
 while true; do
   node client.js https://your-token-url/ tailscale > /tmp/token.json
-  sleep 3000  # 50 minutes
+  sleep 480  # 8 minutes
 done
+```
+
+**Why refresh early?**
+- Prevents expired token errors
+- Handles network delays and retries
+- Ensures smooth continuous access
+- Tolerates clock skew between systems
+
+#### Client Implementation Examples
+
+**Node.js - Automatic Token Management:**
+
+```javascript
+class OIDCTokenManager {
+  constructor(tokenUrl, audience) {
+    this.tokenUrl = tokenUrl;
+    this.audience = audience;
+    this.token = null;
+    this.expiresAt = null;
+  }
+
+  async getToken() {
+    const now = Date.now();
+
+    // Return cached token if still valid (with 20% buffer before expiration)
+    if (this.token && this.expiresAt && (this.expiresAt - now > (this.expiresIn * 0.2 * 1000))) {
+      return this.token;
+    }
+
+    // Fetch new token
+    console.log('Fetching new OIDC token...');
+    const response = await getOIDCToken(this.tokenUrl, this.audience);
+
+    this.token = response.access_token;
+    this.expiresIn = response.expires_in;
+    this.expiresAt = now + (response.expires_in * 1000);
+
+    console.log(`Token refreshed, expires in ${response.expires_in} seconds`);
+    return this.token;
+  }
+
+  async getAuthHeader() {
+    const token = await this.getToken();
+    return `Bearer ${token}`;
+  }
+}
+
+// Usage
+const tokenManager = new OIDCTokenManager('https://your-token-url/', 'tailscale');
+
+// Automatically handles expiration and refresh
+setInterval(async () => {
+  const authHeader = await tokenManager.getAuthHeader();
+  // Use authHeader for API calls
+}, 60000); // Check every minute
+```
+
+**Python - Token Caching with Expiration:**
+
+```python
+import time
+import boto3
+import requests
+from datetime import datetime, timedelta
+from botocore.auth import SigV4Auth
+from botocore.awsrequest import AWSRequest
+
+class OIDCTokenManager:
+    def __init__(self, token_url, audience='tailscale', region='us-east-1'):
+        self.token_url = token_url
+        self.audience = audience
+        self.region = region
+        self.token = None
+        self.expires_at = None
+
+    def get_token(self):
+        """Get token, refreshing if expired or within 20% of expiration"""
+        now = datetime.now()
+
+        # Check if we have a valid cached token (with 20% buffer)
+        if self.token and self.expires_at:
+            time_remaining = (self.expires_at - now).total_seconds()
+            if time_remaining > (600 * 0.2):  # 600 = default token lifetime
+                return self.token
+
+        # Fetch new token
+        print('Fetching new OIDC token...')
+        session = boto3.Session()
+        credentials = session.get_credentials()
+
+        url = f"{self.token_url}?audience={self.audience}"
+        request = AWSRequest(method='POST', url=url,
+                            headers={'Host': self.token_url.split('/')[2]})
+        SigV4Auth(credentials, 'lambda', self.region).add_auth(request)
+
+        response = requests.post(url, headers=dict(request.headers))
+        response.raise_for_status()
+
+        token_data = response.json()
+        self.token = token_data['access_token']
+        self.expires_at = now + timedelta(seconds=token_data['expires_in'])
+
+        print(f"Token refreshed, expires in {token_data['expires_in']} seconds")
+        return self.token
+
+    def get_auth_header(self):
+        """Get Authorization header with current token"""
+        token = self.get_token()
+        return f"Bearer {token}"
+
+# Usage
+token_manager = OIDCTokenManager('https://your-token-url/', 'tailscale')
+
+# Use in your application
+while True:
+    auth_header = token_manager.get_auth_header()
+    # Use auth_header for API calls
+    time.sleep(60)  # Your application logic
+```
+
+**Bash - Simple Cron-based Refresh:**
+
+```bash
+#!/bin/bash
+# refresh-token.sh
+# Refresh token every 8 minutes via cron
+
+TOKEN_URL="https://your-token-url/"
+AUDIENCE="tailscale"
+TOKEN_FILE="/var/run/oidc-token.json"
+
+# Fetch new token
+node /path/to/client.js "$TOKEN_URL" "$AUDIENCE" > "$TOKEN_FILE.tmp"
+
+# Atomic replace
+if [ $? -eq 0 ]; then
+    mv "$TOKEN_FILE.tmp" "$TOKEN_FILE"
+    echo "$(date): Token refreshed successfully" >> /var/log/token-refresh.log
+else
+    echo "$(date): Token refresh failed" >> /var/log/token-refresh.log
+    rm -f "$TOKEN_FILE.tmp"
+    exit 1
+fi
+```
+
+```bash
+# Add to crontab: refresh every 8 minutes
+*/8 * * * * /path/to/refresh-token.sh
+```
+
+**Docker Sidecar - Continuous Refresh:**
+
+```yaml
+# docker-compose.yml
+version: '3.8'
+
+services:
+  token-refresher:
+    image: ghcr.io/latacora/aws-oidc-token:latest
+    environment:
+      - AWS_ACCESS_KEY_ID
+      - AWS_SECRET_ACCESS_KEY
+      - AWS_REGION=${AWS_REGION:-us-east-1}
+      - TOKEN_URL=https://your-token-url/
+      - AUDIENCE=tailscale
+      - REFRESH_INTERVAL=480  # 8 minutes
+    command: >
+      sh -c 'while true; do
+        echo "Fetching token at $$(date)";
+        node client.js $$TOKEN_URL $$AUDIENCE > /shared/token.json || echo "Failed to fetch token";
+        sleep $$REFRESH_INTERVAL;
+      done'
+    volumes:
+      - token-data:/shared
+
+  app:
+    image: your-app:latest
+    volumes:
+      - token-data:/shared:ro  # Read-only access to token
+    depends_on:
+      - token-refresher
+
+volumes:
+  token-data:
+```
+
+#### Handling Token Refresh Failures
+
+Implement retry logic for transient failures:
+
+```javascript
+async function getTokenWithRetry(tokenUrl, audience, maxRetries = 3) {
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      return await getOIDCToken(tokenUrl, audience);
+    } catch (error) {
+      console.error(`Token fetch attempt ${attempt} failed:`, error.message);
+
+      if (attempt === maxRetries) {
+        throw new Error(`Failed to fetch token after ${maxRetries} attempts`);
+      }
+
+      // Exponential backoff: 1s, 2s, 4s
+      const delay = Math.pow(2, attempt - 1) * 1000;
+      await new Promise(resolve => setTimeout(resolve, delay));
+    }
+  }
+}
+```
+
+#### Monitoring Token Refresh
+
+Track token refresh metrics in production:
+
+```javascript
+class MonitoredTokenManager extends OIDCTokenManager {
+  constructor(tokenUrl, audience, metricsClient) {
+    super(tokenUrl, audience);
+    this.metricsClient = metricsClient;
+    this.refreshCount = 0;
+    this.errorCount = 0;
+  }
+
+  async getToken() {
+    try {
+      const token = await super.getToken();
+      this.refreshCount++;
+      this.metricsClient.increment('oidc.token.refresh.success');
+      return token;
+    } catch (error) {
+      this.errorCount++;
+      this.metricsClient.increment('oidc.token.refresh.error');
+      throw error;
+    }
+  }
+
+  getMetrics() {
+    return {
+      refreshCount: this.refreshCount,
+      errorCount: this.errorCount,
+      currentExpiry: this.expiresAt
+    };
+  }
+}
 ```
 
 ## Advanced Usage
@@ -393,8 +652,8 @@ let tokenExpiry = null;
 async function getOIDCTokenCached(tokenUrl, audience) {
   const now = Date.now();
 
-  // Return cached token if still valid (with 5-minute buffer)
-  if (cachedToken && tokenExpiry && (tokenExpiry - now > 300000)) {
+  // Return cached token if still valid (with 2-minute buffer for 10-minute tokens)
+  if (cachedToken && tokenExpiry && (tokenExpiry - now > 120000)) {
     return cachedToken;
   }
 
@@ -442,8 +701,9 @@ echo $TOKEN | cut -d'.' -f2 | base64 -d | jq
 4. **Limit Permissions**: Grant only `lambda:InvokeFunctionUrl` for the specific Lambda
 5. **Use HTTPS**: Always use HTTPS for token URLs
 6. **Monitor Usage**: Set up CloudWatch alarms for unusual token requests
-7. **Short-lived Tokens**: Keep default 1-hour expiry, implement refresh
-8. **Secure Storage**: Store tokens in memory only, never write to disk
+7. **Short-lived Tokens**: Keep default 10-minute expiry, implement proactive refresh (around 80% of lifetime)
+8. **Secure Storage**: Store tokens in memory only, never write to disk unless absolutely necessary
+9. **Handle Expiration Gracefully**: Implement automatic token refresh before expiration to prevent service disruptions
 
 ## Additional Resources
 
