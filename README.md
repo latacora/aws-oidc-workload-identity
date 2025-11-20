@@ -2,6 +2,8 @@
 
 Exchange AWS authentication for OIDC tokens using KMS-backed signing.
 
+> **Update**: AWS has released [outbound OIDC identity providers](https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles_providers_outbound.html), a built-in feature that provides similar functionality to this project. For new deployments, we recommend evaluating AWS's native solution first, as it requires no infrastructure deployment. This project remains useful if you need additional customization or are already using it in production.
+
 ## ⚠️ Experimental - Unreviewed Code
 
 **This project is experimental and has not undergone security review.** It is provided as a proof-of-concept implementation for exchanging AWS credentials for OIDC tokens. Before using in production:
